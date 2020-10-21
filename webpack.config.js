@@ -15,15 +15,17 @@ var MiniCssExtractPlugin = require("mini-css-extract-plugin");
 var CONFIG = {
     // The tags to include the generated JS and CSS will be automatically injected in the HTML template
     // See https://github.com/jantimon/html-webpack-plugin
-    indexHtmlTemplate: "./src/index.html",
-    fsharpEntry: "./src/App.fsproj",
-    cssEntry: "./styles/main.scss",
+    indexHtmlTemplate: "./src/client/index.html",
+    fsharpEntry: "./src/client/Client.fsproj",
+    cssEntry: "./src/client/styles/main.scss",
     outputDir: "./deploy",
-    assetsDir: "./public",
+    assetsDir: "./client/public",
     devServerPort: 8080,
     // When using webpack-dev-server, you may need to redirect some calls
     // to a external API server. See https://webpack.js.org/configuration/dev-server/#devserver-proxy
-    devServerProxy: undefined,
+    devServerProxy: {
+        "/api": "http://localhost:8000"
+    },
     // Use babel-preset-env to generate JS compatible with most-used browsers.
     // More info at https://babeljs.io/docs/en/next/babel-preset-env.html
     babel: {
