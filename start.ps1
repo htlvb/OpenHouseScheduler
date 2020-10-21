@@ -1,5 +1,5 @@
-$serverDir = "$PSScriptRoot\src\Server"
-$clientDir = "$PSScriptRoot\src\Client"
+$serverDir = "$PSScriptRoot\src\server"
+$clientDir = "$PSScriptRoot\src\client"
 yarn --cwd $clientDir install --frozen-lockfile
 
 wt `
