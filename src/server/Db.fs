@@ -19,3 +19,8 @@ let getSchedule dbConfig = async {
     let! result = connection.QueryAsync<Schedule>("SELECT * FROM schedule") |> Async.AwaitTask
     return Seq.toList result
 }
+
+let book dbConfig (data: Schedule) = async {
+    use connection = createConnection dbConfig
+    do! connection.ExecuteAsync("INSERT INTO schedule (SlotNumber, Name, MailAddress) VALUES (@SlotNumber, @Name, @MailAddress)", data) |> Async.AwaitTask |> Async.Ignore
+}

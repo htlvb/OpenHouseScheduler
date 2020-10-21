@@ -3,11 +3,18 @@
         <TargetFramework>netcoreapp3.1</TargetFramework>
     </PropertyGroup>
     <ItemGroup>
+        <Compile Include="..\server\DataTransfer.fs" />
+        <Compile Include="View.fs" />
         <Compile Include="Main.fs" />
     </ItemGroup>
     <ItemGroup>
         <PackageReference Update="FSharp.Core" Version="4.7.*" />
+        <PackageReference Include="Fable.FontAwesome.Free" Version="2.1.0" />
         <PackageReference Include="Feliz" Version="1.13.0" />
+        <PackageReference Include="Feliz.Bulma" Version="2.3.0" />
+        <PackageReference Include="Feliz.UseDeferred" Version="1.3.0" />
+        <PackageReference Include="Feliz.UseElmish" Version="1.4.1" />
+        <PackageReference Include="Thoth.Fetch" Version="2.0.0" />
         <PackageReference Include="Zanaptak.TypedCssClasses" Version="0.2.0" />
     </ItemGroup>
 </Project>

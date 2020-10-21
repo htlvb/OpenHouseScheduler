@@ -1,5 +1,6 @@
 module App.Program
 
+open DataTransfer
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open Giraffe
 open Giraffe.Serialization
@@ -21,7 +22,8 @@ open Thoth.Json.Net
 
 type AppConfig = {
     DbConnectionString: Db.ConnectionString
-    StartTime: DateTime
+    Date: DateTimeOffset
+    StartTime: TimeSpan
     SlotDuration: TimeSpan
     NumberOfSlots: int
 }
@@ -37,7 +39,7 @@ module AppConfig =
         | _ -> failwithf "Environment variable \"%s\" can't be parsed as integer" name
     let private envVarAsDateTime name (format: string) =
         let v = envVar name
-        match DateTime.TryParseExact(v, format, CultureInfo.InvariantCulture, DateTimeStyles.None) with
+        match DateTimeOffset.TryParseExact(v, format, CultureInfo.InvariantCulture, DateTimeStyles.None) with
         | (true, v) -> v
         | _ -> failwithf "Environment variable \"%s\" can't be parsed as date time (format must be \"%s\")" name format
     let private envVarAsTimeSpan name (format: string) =
@@ -49,21 +51,14 @@ module AppConfig =
     let fromEnvironment () =
         {
             DbConnectionString = envVar "DB_CONNECTION_STRING" |> Db.ConnectionString
-            StartTime = envVarAsDateTime "SCHEDULE_START_TIME" "dd.MM.yyyy HH:mm"
-            SlotDuration = envVarAsTimeSpan "SCHEDULE_SLOT_DURATION" "HH:mm"
+            Date = envVarAsDateTime "SCHEDULE_DATE" "dd.MM.yyyy"
+            StartTime = envVarAsTimeSpan "SCHEDULE_START_TIME" "hh\\:mm"
+            SlotDuration = envVarAsTimeSpan "SCHEDULE_SLOT_DURATION" "hh\\:mm"
             NumberOfSlots = envVarAsInt "SCHEDULE_NUMBER_OF_SLOTS"
         }
 
-type ReservationType =
-    | Free of reservationLink: string
-    | Taken
-
-type Schedule = {
-    StartTime: DateTime
-    ReservationType: ReservationType
-}
 module Schedule =
-    let fromDb (startTime: DateTime) (slotDuration: TimeSpan) (schedule: Db.Schedule) =
+    let fromDb (startTime: TimeSpan) (slotDuration: TimeSpan) (schedule: Db.Schedule) =
         {
             StartTime = startTime + slotDuration * (float <| schedule.SlotNumber - 1)
             ReservationType = Taken
@@ -72,7 +67,7 @@ module Schedule =
 let handleGetSchedule appConfig : HttpHandler =
     fun next ctx -> task {
         let! schedule = Db.getSchedule (appConfig.DbConnectionString)
-        let result =
+        let scheduleEntries =
             [ 1..appConfig.NumberOfSlots ]
             |> List.map (fun slotNumber ->
                 schedule
@@ -83,7 +78,11 @@ let handleGetSchedule appConfig : HttpHandler =
                     ReservationType = Free (sprintf "/api/schedule/%d" slotNumber)
                 }
             )
-        return! Successful.OK [] next ctx
+        let schedule = {
+            Date = appConfig.Date
+            Entries = scheduleEntries
+        }
+        return! Successful.OK schedule next ctx
     }
 
 type Subscriber = {
@@ -97,7 +96,7 @@ module Subscriber =
                 MailAddress subscriber.MailAddress |> ignore
                 true
             with _ -> false
-        if String.IsNullOrWhiteSpace subscriber.Name || not mailAddressIsValid
+        if String.IsNullOrWhiteSpace subscriber.Name || subscriber.Name.Length > 100 || not mailAddressIsValid || subscriber.MailAddress.Length > 100
         then Error ()
         else Ok { Name = subscriber.Name; MailAddress = subscriber.MailAddress }
 
@@ -106,7 +105,11 @@ let handlePostSchedule appConfig slotNumber : HttpHandler =
         let! subscriber = ctx.BindJsonAsync<DataTransfer.Subscriber>()
         match Subscriber.validate subscriber with
         | Ok v -> 
-            // TODO insert subscription
+            do! Db.book appConfig.DbConnectionString {
+                Db.Schedule.SlotNumber = slotNumber
+                Db.Schedule.Name = subscriber.Name
+                Db.Schedule.MailAddress = subscriber.MailAddress
+            }
             return! Successful.OK () next ctx
         | Error () -> return! RequestErrors.BAD_REQUEST () next ctx
     }
@@ -121,7 +124,7 @@ let webApp =
                     route "/schedule" >=> handleGetSchedule appConfig
                 ]
                 POST >=> choose [
-                    routef "/schedule/%d" (fun slotNumber -> handlePostSchedule appConfig slotNumber)
+                    routef "/schedule/%i" (fun slotNumber -> handlePostSchedule appConfig slotNumber)
                 ]
             ])
         setStatusCode 404 >=> text "Not Found" ]
