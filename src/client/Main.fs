@@ -178,86 +178,91 @@ let schedule = React.functionComponent(fun () ->
                                         ]
                                 ]
                         ]
-                    yield Bulma.field.div [
-                        Bulma.label [ Html.text "Name" ]
-                        Bulma.control.div [
-                            control.hasIconsLeft
-                            control.hasIconsRight
-                            prop.children [
-                                Bulma.input.text [
-                                    prop.placeholder "Bitte geben Sie Ihren Namen an"
-                                    prop.value (loadedModel.Name |> Option.map fst |> Option.defaultValue "")
-                                    match loadedModel.Name with
-                                    | Some (_, true) -> color.isSuccess
-                                    | Some _ -> color.isDanger
-                                    | None -> ()
-                                    prop.onChange (fun (e: Browser.Types.Event) -> dispatch (SetName e.target?value))
-                                ]
-                                Bulma.icon [
-                                    icon.isSmall
-                                    icon.isLeft
+                    yield Html.form [
+                        prop.onSubmit (fun e -> e.preventDefault(); dispatch Book)
+                        prop.children [
+                            Bulma.field.div [
+                                Bulma.label [ Html.text "Name" ]
+                                Bulma.control.div [
+                                    control.hasIconsLeft
+                                    control.hasIconsRight
                                     prop.children [
-                                        Fa.i [ Fa.Solid.User ] []
+                                        Bulma.input.text [
+                                            prop.placeholder "Bitte geben Sie Ihren Namen an"
+                                            prop.value (loadedModel.Name |> Option.map fst |> Option.defaultValue "")
+                                            match loadedModel.Name with
+                                            | Some (_, true) -> color.isSuccess
+                                            | Some _ -> color.isDanger
+                                            | None -> ()
+                                            prop.onChange (fun (e: Browser.Types.Event) -> dispatch (SetName e.target?value))
+                                        ]
+                                        Bulma.icon [
+                                            icon.isSmall
+                                            icon.isLeft
+                                            prop.children [
+                                                Fa.i [ Fa.Solid.User ] []
+                                            ]
+                                        ]
                                     ]
                                 ]
                             ]
-                        ]
-                    ]
-                    yield Bulma.field.div [
-                        Bulma.label [ Html.text "E-Mail-Adresse" ]
-                        Bulma.control.div [
-                            control.hasIconsLeft
-                            control.hasIconsRight
-                            prop.children [
-                                Bulma.input.text [
-                                    prop.placeholder "Bitte geben Sie Ihre E-Mail-Adresse an"
-                                    prop.value (loadedModel.MailAddress |> Option.map fst |> Option.defaultValue "")
-                                    match loadedModel.MailAddress with
-                                    | Some (_, true) -> color.isSuccess
-                                    | Some _ -> color.isDanger
-                                    | None -> ()
-                                    prop.onChange (fun (e: Browser.Types.Event) -> dispatch (SetMailAddress e.target?value))
-                                ]
-                                Bulma.icon [
-                                    icon.isSmall
-                                    icon.isLeft
+                            Bulma.field.div [
+                                Bulma.label [ Html.text "E-Mail-Adresse" ]
+                                Bulma.control.div [
+                                    control.hasIconsLeft
+                                    control.hasIconsRight
                                     prop.children [
-                                        Fa.i [ Fa.Solid.Envelope ] []
+                                        Bulma.input.text [
+                                            prop.placeholder "Bitte geben Sie Ihre E-Mail-Adresse an"
+                                            prop.value (loadedModel.MailAddress |> Option.map fst |> Option.defaultValue "")
+                                            match loadedModel.MailAddress with
+                                            | Some (_, true) -> color.isSuccess
+                                            | Some _ -> color.isDanger
+                                            | None -> ()
+                                            prop.onChange (fun (e: Browser.Types.Event) -> dispatch (SetMailAddress e.target?value))
+                                        ]
+                                        Bulma.icon [
+                                            icon.isSmall
+                                            icon.isLeft
+                                            prop.children [
+                                                Fa.i [ Fa.Solid.Envelope ] []
+                                            ]
+                                        ]
                                     ]
                                 ]
                             ]
-                        ]
-                    ]
 
-                    yield Bulma.level [
-                        Bulma.levelLeft [
-                            Bulma.levelItem [
-                                Bulma.button.button [
-                                    prop.text "Reservieren"
-                                    color.isSuccess
-                                    prop.onClick (fun _ -> dispatch Book)
-                                    match loadedModel.ReservationLink, loadedModel.Name, loadedModel.MailAddress with
-                                    | Some _, Some (_, true), Some (_, true) -> ()
-                                    | _ -> prop.disabled true
-                                    if Deferred.inProgress loadedModel.BookingState then button.isLoading
+                            Bulma.level [
+                                Bulma.levelLeft [
+                                    Bulma.levelItem [
+                                        Bulma.button.button [
+                                            prop.type' "submit"
+                                            prop.text "Reservieren"
+                                            color.isSuccess
+                                            match loadedModel.ReservationLink, loadedModel.Name, loadedModel.MailAddress with
+                                            | Some _, Some (_, true), Some (_, true) -> ()
+                                            | _ -> prop.disabled true
+                                            if Deferred.inProgress loadedModel.BookingState then button.isLoading
+                                        ]
+                                    ]
+                                    match loadedModel.BookingState with
+                                    | Deferred.Resolved () ->
+                                        Bulma.levelItem [
+                                            color.hasTextSuccess
+                                            prop.children [
+                                                Html.text "Ihre Reservierung wurde erfolgreich gespeichert. Sie erhalten in Kürze eine Bestätigung per Mail."
+                                            ]
+                                        ]
+                                    | Deferred.Failed _ ->
+                                        Bulma.levelItem [
+                                            color.hasTextDanger
+                                            prop.children [
+                                                Html.text "Fehler beim Reservieren. Bitte versuchen Sie es erneut bzw. laden sie die Seite neu."
+                                            ]
+                                        ]
+                                    | _ -> ()
                                 ]
                             ]
-                            match loadedModel.BookingState with
-                            | Deferred.Resolved () ->
-                                Bulma.levelItem [
-                                    color.hasTextSuccess
-                                    prop.children [
-                                        Html.text "Ihre Reservierung wurde erfolgreich gespeichert. Sie erhalten in Kürze eine Bestätigung per Mail."
-                                    ]
-                                ]
-                            | Deferred.Failed _ ->
-                                Bulma.levelItem [
-                                    color.hasTextDanger
-                                    prop.children [
-                                        Html.text "Fehler beim Reservieren. Bitte versuchen Sie es erneut bzw. laden sie die Seite neu."
-                                    ]
-                                ]
-                            | _ -> ()
                         ]
                     ]
                 ]
