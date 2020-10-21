@@ -109,6 +109,7 @@ let handlePostSchedule appConfig slotNumber : HttpHandler =
                 Db.Schedule.SlotNumber = slotNumber
                 Db.Schedule.Name = subscriber.Name
                 Db.Schedule.MailAddress = subscriber.MailAddress
+                Db.Schedule.TimeStamp = DateTime.Now
             }
             return! Successful.OK () next ctx
         | Error () -> return! RequestErrors.BAD_REQUEST () next ctx

@@ -2,6 +2,7 @@ module Db
 
 open Dapper
 open MySql.Data.MySqlClient
+open System
 
 type ConnectionString = ConnectionString of string
 
@@ -9,6 +10,7 @@ type Schedule = {
     SlotNumber: int
     Name: string
     MailAddress: string
+    TimeStamp: DateTime
 }
 
 let private createConnection (ConnectionString connectionString) =
@@ -22,5 +24,5 @@ let getSchedule dbConfig = async {
 
 let book dbConfig (data: Schedule) = async {
     use connection = createConnection dbConfig
-    do! connection.ExecuteAsync("INSERT INTO schedule (SlotNumber, Name, MailAddress) VALUES (@SlotNumber, @Name, @MailAddress)", data) |> Async.AwaitTask |> Async.Ignore
+    do! connection.ExecuteAsync("INSERT INTO schedule (SlotNumber, Name, MailAddress, TimeStamp) VALUES (@SlotNumber, @Name, @MailAddress, @TimeStamp)", data) |> Async.AwaitTask |> Async.Ignore
 }
