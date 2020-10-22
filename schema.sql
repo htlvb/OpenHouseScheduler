@@ -1,4 +1,4 @@
-USE open-house-scheduler
+USE openhousescheduler
 
 CREATE TABLE schedule
 (
