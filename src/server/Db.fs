@@ -7,7 +7,7 @@ open System
 type ConnectionString = ConnectionString of string
 
 type Schedule = {
-    SlotNumber: int
+    Time: TimeSpan
     Name: string
     MailAddress: string
     TimeStamp: DateTime
@@ -24,5 +24,5 @@ let getSchedule dbConfig = async {
 
 let book dbConfig (data: Schedule) = async {
     use connection = createConnection dbConfig
-    do! connection.ExecuteAsync("INSERT INTO schedule (SlotNumber, Name, MailAddress, TimeStamp) VALUES (@SlotNumber, @Name, @MailAddress, @TimeStamp)", data) |> Async.AwaitTask |> Async.Ignore
+    do! connection.ExecuteAsync("INSERT INTO schedule (Time, Name, MailAddress, TimeStamp) VALUES (@Time, @Name, @MailAddress, @TimeStamp)", data) |> Async.AwaitTask |> Async.Ignore
 }

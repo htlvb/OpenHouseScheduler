@@ -12,7 +12,6 @@ open Microsoft.Extensions.Logging
 open System
 open System.Globalization
 open System.Net.Mail
-open System.Text.RegularExpressions
 open Thoth.Json.Giraffe
 open Thoth.Json.Net
 
@@ -75,9 +74,9 @@ let getSlotStartTime (startTime: TimeSpan) (slotDuration: TimeSpan) slotNumber =
     startTime + slotDuration * (float <| slotNumber - 1)
 
 module Schedule =
-    let fromDb (startTime: TimeSpan) (slotDuration: TimeSpan) (schedule: Db.Schedule) =
+    let fromDb (schedule: Db.Schedule) =
         {
-            StartTime = getSlotStartTime startTime slotDuration schedule.SlotNumber
+            StartTime = schedule.Time
             ReservationType = Taken
         }
 
@@ -87,9 +86,10 @@ let handleGetSchedule appConfig : HttpHandler =
         let scheduleEntries =
             [ 1..appConfig.NumberOfSlots ]
             |> List.map (fun slotNumber ->
+                let startTime = getSlotStartTime appConfig.StartTime appConfig.SlotDuration slotNumber
                 schedule
-                |> List.tryFind(fun entry -> entry.SlotNumber = slotNumber)
-                |> Option.map (Schedule.fromDb appConfig.StartTime appConfig.SlotDuration)
+                |> List.tryFind(fun entry -> entry.Time = startTime)
+                |> Option.map Schedule.fromDb
                 |> Option.defaultValue {
                     StartTime = getSlotStartTime appConfig.StartTime appConfig.SlotDuration slotNumber
                     ReservationType = Free (sprintf "api/schedule/%d" slotNumber)
@@ -120,10 +120,10 @@ module Subscriber =
 let handlePostSchedule appConfig slotNumber : HttpHandler =
     fun next ctx -> task {
         let! subscriber = ctx.BindJsonAsync<DataTransfer.Subscriber>()
-        match Subscriber.validate subscriber with
-        | Ok v -> 
+        match Subscriber.validate subscriber, slotNumber with
+        | Ok subscriber, slotNumber when slotNumber > 0 && slotNumber <= appConfig.NumberOfSlots -> 
             do! Db.book appConfig.DbConnectionString {
-                Db.Schedule.SlotNumber = slotNumber
+                Db.Schedule.Time = getSlotStartTime appConfig.StartTime appConfig.SlotDuration slotNumber
                 Db.Schedule.Name = subscriber.Name
                 Db.Schedule.MailAddress = subscriber.MailAddress
                 Db.Schedule.TimeStamp = DateTime.Now
@@ -146,7 +146,7 @@ Wir freuen uns, sie bei uns begrüßen zu dürfen."""
             }
             do! Mail.sendBookingConfirmation appConfig.MailSettings subscriber subject content
             return! Successful.OK () next ctx
-        | Error () -> return! RequestErrors.BAD_REQUEST () next ctx
+        | _ -> return! RequestErrors.BAD_REQUEST () next ctx
     }
 
 let appConfig = AppConfig.fromEnvironment ()
