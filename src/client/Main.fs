@@ -41,7 +41,7 @@ let init =
     state, Cmd.ofMsg LoadSchedule
 
 let loadSchedule = async {
-    let! (schedule : Schedule) = Fetch.``get``("/api/schedule", caseStrategy = CamelCase) |> Async.AwaitPromise
+    let! (schedule : Schedule) = Fetch.``get``("api/schedule", caseStrategy = CamelCase) |> Async.AwaitPromise
     return schedule
 }
 

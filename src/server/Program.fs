@@ -92,7 +92,7 @@ let handleGetSchedule appConfig : HttpHandler =
                 |> Option.map (Schedule.fromDb appConfig.StartTime appConfig.SlotDuration)
                 |> Option.defaultValue {
                     StartTime = getSlotStartTime appConfig.StartTime appConfig.SlotDuration slotNumber
-                    ReservationType = Free (sprintf "/api/schedule/%d" slotNumber)
+                    ReservationType = Free (sprintf "api/schedule/%d" slotNumber)
                 }
             )
         let schedule = {
