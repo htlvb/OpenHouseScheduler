@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <TargetFramework>netcoreapp3.1</TargetFramework>
-    <TransformWebConfigEnabled>False</TransformWebConfigEnabled>
+    <ExcludeFilesFromDeployment>web.config</ExcludeFilesFromDeployment>
   </PropertyGroup>
 
   <ItemGroup>
