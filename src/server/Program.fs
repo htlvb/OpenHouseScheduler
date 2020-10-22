@@ -26,6 +26,7 @@ type AppConfig = {
     StartTime: TimeSpan
     SlotDuration: TimeSpan
     NumberOfSlots: int
+    MailSettings: Mail.Settings
 }
 module AppConfig =
     let private envVar name =
@@ -55,12 +56,28 @@ module AppConfig =
             StartTime = envVarAsTimeSpan "SCHEDULE_START_TIME" "hh\\:mm"
             SlotDuration = envVarAsTimeSpan "SCHEDULE_SLOT_DURATION" "hh\\:mm"
             NumberOfSlots = envVarAsInt "SCHEDULE_NUMBER_OF_SLOTS"
+            MailSettings = {
+                Mail.Settings.Sender = {
+                    Mail.MailUser.Name = envVar "MAIL_SENDER_NAME"
+                    Mail.MailUser.MailAddress = envVar "MAIL_SENDER_MAIL_ADDRESS"
+                }
+                Mail.Settings.BccRecipient = {
+                    Mail.MailUser.Name = envVar "MAIL_BCC_RECIPIENT_NAME"
+                    Mail.MailUser.MailAddress = envVar "MAIL_BCC_RECIPIENT_MAIL_ADDRESS"
+                }
+                Mail.Settings.MailboxUserName = envVar "MAILBOX_USERNAME"
+                Mail.Settings.MailboxPassword = envVar "MAILBOX_PASSWORD"
+                Mail.Settings.SmtpAddress = envVar "MAILBOX_SMTP_ADDRESS"
+            }
         }
+
+let getSlotStartTime (startTime: TimeSpan) (slotDuration: TimeSpan) slotNumber =
+    startTime + slotDuration * (float <| slotNumber - 1)
 
 module Schedule =
     let fromDb (startTime: TimeSpan) (slotDuration: TimeSpan) (schedule: Db.Schedule) =
         {
-            StartTime = startTime + slotDuration * (float <| schedule.SlotNumber - 1)
+            StartTime = getSlotStartTime startTime slotDuration schedule.SlotNumber
             ReservationType = Taken
         }
 
@@ -74,7 +91,7 @@ let handleGetSchedule appConfig : HttpHandler =
                 |> List.tryFind(fun entry -> entry.SlotNumber = slotNumber)
                 |> Option.map (Schedule.fromDb appConfig.StartTime appConfig.SlotDuration)
                 |> Option.defaultValue {
-                    StartTime = appConfig.StartTime + appConfig.SlotDuration * (float <| slotNumber - 1)
+                    StartTime = getSlotStartTime appConfig.StartTime appConfig.SlotDuration slotNumber
                     ReservationType = Free (sprintf "/api/schedule/%d" slotNumber)
                 }
             )
@@ -111,6 +128,23 @@ let handlePostSchedule appConfig slotNumber : HttpHandler =
                 Db.Schedule.MailAddress = subscriber.MailAddress
                 Db.Schedule.TimeStamp = DateTime.Now
             }
+            let subject = "Anmeldung zum Tag der offenen Tür der HTL Vöcklabruck"
+            let content =
+                let startTime = getSlotStartTime appConfig.StartTime appConfig.SlotDuration slotNumber
+                sprintf """%s,
+
+vielen Dank für die Anmeldung zum Tag der offenen Tür der HTL Vöcklabruck am %s.
+Aufgrund von Covid-19 bitten wir sie, pünktlich um %s zu Ihrer persönlichen Führung zu erscheinen.
+Bei Änderungswünschen oder im Falle einer Verhinderung bitten wir sie außerdem, uns sobald wie möglich Bescheid zu geben.
+Antworten Sie dafür auf diese E-Mail bzw. kontaktieren Sie uns telefonisch unter 07672/24605.
+
+Wir freuen uns, sie bei uns begrüßen zu dürfen."""
+                    subscriber.Name (appConfig.Date.ToString("dd.MM.yyyy")) (startTime.ToString("hh\\:mm"))
+            let subscriber = {
+                Mail.MailUser.Name = subscriber.Name
+                Mail.MailUser.MailAddress = subscriber.MailAddress
+            }
+            do! Mail.sendBookingConfirmation appConfig.MailSettings subscriber subject content
             return! Successful.OK () next ctx
         | Error () -> return! RequestErrors.BAD_REQUEST () next ctx
     }

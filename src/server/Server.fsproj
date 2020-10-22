@@ -6,6 +6,7 @@
 
   <ItemGroup>
     <Compile Include="Db.fs" />
+    <Compile Include="Mail.fs" />
     <Compile Include="DataTransfer.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
@@ -13,6 +14,7 @@
   <ItemGroup>
     <PackageReference Include="Dapper" Version="2.0.35" />
     <PackageReference Include="Giraffe" Version="4.1.0" />
+    <PackageReference Include="MailKit" Version="2.9.0" />
     <PackageReference Include="Mysql.Data" Version="8.0.22" />
     <PackageReference Include="Thoth.Json.Giraffe" Version="4.2.0" />
   </ItemGroup>
