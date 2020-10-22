@@ -126,7 +126,7 @@ let schedule = React.functionComponent(fun () ->
                                     Bulma.title.h1 [
                                         match date with
                                         | Some date ->
-                                            Html.text (sprintf "Tag der offenen Tür %s" (date.ToString("dd.MM.yyyy")))
+                                            Html.text (sprintf "Tag der offenen Tür am %s" (date.ToString("dd.MM.yyyy")))
                                         | None ->
                                             Html.text (sprintf "Tag der offenen Tür")
                                     ]
