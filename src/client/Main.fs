@@ -119,8 +119,6 @@ let schedule = React.functionComponent(fun () ->
                                         prop.src "img/logo.svg"
                                         prop.style [
                                             style.width 120
-                                            style.padding 10
-                                            style.backgroundColor "white"
                                         ]
                                     ]
                                 ]
