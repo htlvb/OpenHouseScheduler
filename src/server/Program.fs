@@ -32,6 +32,7 @@ type MailConfig = {
 
 type AppConfig = {
     DbConnectionString: Db.ConnectionString
+    ReservationStartTime: DateTimeOffset
     Date: DateTimeOffset
     InfoText: string
     StartTime: TimeSpan
@@ -65,6 +66,7 @@ module AppConfig =
     let fromEnvironment () =
         {
             DbConnectionString = envVar "DB_CONNECTION_STRING" |> Db.ConnectionString
+            ReservationStartTime = envVarAsDateTime "RESERVATION_START_TIME" "dd.MM.yyyy HH:mm:ss"
             Date = envVarAsDateTime "SCHEDULE_DATE" "dd.MM.yyyy"
             InfoText = envVar "INFO_TEXT" |> parseMarkdown
             StartTime = envVarAsTimeSpan "SCHEDULE_START_TIME" "hh\\:mm"
@@ -114,6 +116,7 @@ let handleGetSchedule appConfig : HttpHandler =
             )
         let schedule = {
             Date = appConfig.Date
+            ReservationStartTime = appConfig.ReservationStartTime
             InfoText = appConfig.InfoText
             Entries = scheduleEntries
         }
@@ -137,39 +140,42 @@ module Subscriber =
 
 let handlePostSchedule appConfig slotNumber : HttpHandler =
     fun next ctx -> task {
-        let! subscriber = ctx.BindJsonAsync<DataTransfer.Subscriber>()
-        match Subscriber.validate subscriber, slotNumber with
-        | Ok subscriber, slotNumber when slotNumber > 0 && slotNumber <= appConfig.NumberOfSlots -> 
-            do! Db.book appConfig.DbConnectionString {
-                Db.Schedule.Time = getSlotStartTime appConfig.StartTime appConfig.SlotDuration slotNumber
-                Db.Schedule.Name = subscriber.Name
-                Db.Schedule.MailAddress = subscriber.MailAddress
-                Db.Schedule.TimeStamp = DateTime.Now
-            }
-            let settings = {
-                Mail.Settings.SmtpAddress = appConfig.MailConfig.SmtpAddress
-                Mail.Settings.MailboxUserName =  appConfig.MailConfig.MailboxUserName
-                Mail.Settings.MailboxPassword =  appConfig.MailConfig.MailboxPassword
-                Mail.Settings.Sender =  appConfig.MailConfig.Sender
-                Mail.Settings.Recipient = {
-                    Mail.User.Name = subscriber.Name
-                    Mail.User.MailAddress = subscriber.MailAddress
+        if appConfig.ReservationStartTime >= DateTimeOffset.Now then
+            return! RequestErrors.BAD_REQUEST () next ctx
+        else
+            let! subscriber = ctx.BindJsonAsync<DataTransfer.Subscriber>()
+            match Subscriber.validate subscriber, slotNumber with
+            | Ok subscriber, slotNumber when slotNumber > 0 && slotNumber <= appConfig.NumberOfSlots -> 
+                do! Db.book appConfig.DbConnectionString {
+                    Db.Schedule.Time = getSlotStartTime appConfig.StartTime appConfig.SlotDuration slotNumber
+                    Db.Schedule.Name = subscriber.Name
+                    Db.Schedule.MailAddress = subscriber.MailAddress
+                    Db.Schedule.TimeStamp = DateTime.Now
                 }
-                Mail.Settings.BccRecipient =  appConfig.MailConfig.BccRecipient
-                Mail.Settings.Subject =  appConfig.MailConfig.Subject
-                Mail.Settings.Content =
-                    let startTime = getSlotStartTime appConfig.StartTime appConfig.SlotDuration slotNumber
-                    let templateVars = [
-                        "FullName", subscriber.Name
-                        "Date", appConfig.Date.ToString("dd.MM.yyyy")
-                        "Time", startTime.ToString("hh\\:mm")
-                    ]
-                    (appConfig.MailConfig.ContentTemplate, templateVars)
-                    ||> List.fold (fun text (varName, value) -> text.Replace(sprintf "{{{%s}}}" varName, value))
-            }
-            do! Mail.sendBookingConfirmation settings
-            return! Successful.OK () next ctx
-        | _ -> return! RequestErrors.BAD_REQUEST () next ctx
+                let settings = {
+                    Mail.Settings.SmtpAddress = appConfig.MailConfig.SmtpAddress
+                    Mail.Settings.MailboxUserName =  appConfig.MailConfig.MailboxUserName
+                    Mail.Settings.MailboxPassword =  appConfig.MailConfig.MailboxPassword
+                    Mail.Settings.Sender =  appConfig.MailConfig.Sender
+                    Mail.Settings.Recipient = {
+                        Mail.User.Name = subscriber.Name
+                        Mail.User.MailAddress = subscriber.MailAddress
+                    }
+                    Mail.Settings.BccRecipient =  appConfig.MailConfig.BccRecipient
+                    Mail.Settings.Subject =  appConfig.MailConfig.Subject
+                    Mail.Settings.Content =
+                        let startTime = getSlotStartTime appConfig.StartTime appConfig.SlotDuration slotNumber
+                        let templateVars = [
+                            "FullName", subscriber.Name
+                            "Date", appConfig.Date.ToString("dd.MM.yyyy")
+                            "Time", startTime.ToString("hh\\:mm")
+                        ]
+                        (appConfig.MailConfig.ContentTemplate, templateVars)
+                        ||> List.fold (fun text (varName, value) -> text.Replace(sprintf "{{{%s}}}" varName, value))
+                }
+                do! Mail.sendBookingConfirmation settings
+                return! Successful.OK () next ctx
+            | _ -> return! RequestErrors.BAD_REQUEST () next ctx
     }
 
 let appConfig = AppConfig.fromEnvironment ()

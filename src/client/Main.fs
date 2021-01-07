@@ -115,6 +115,10 @@ let update msg model =
             Cmd.none
         | _ -> model, Cmd.none
 
+let formatDate (date: System.DateTimeOffset) =
+    if date.TimeOfDay = System.TimeSpan.Zero then date.ToString("dd.MM.yyyy")
+    else date.ToString("dd.MM.yyyy HH:mm:ss")
+
 let schedule = React.functionComponent(fun () ->
     let (state, dispatch) = React.useElmish(init, update, [||])
 
@@ -158,12 +162,17 @@ let schedule = React.functionComponent(fun () ->
     | Deferred.InProgress -> [ header None; View.loadIconBig ]
     | Deferred.Failed _ -> [ header None; View.errorNotificationWithRetry "Fehler beim Laden des Zeitplans" (fun () -> dispatch LoadSchedule) ]
     | Deferred.Resolved loadedModel ->
+        let isReservationEnabled = loadedModel.Schedule.ReservationStartTime <= System.DateTimeOffset.UtcNow
         [
             header (Some loadedModel.Schedule.Date)
             Bulma.container [
                 Bulma.section [
                     prop.innerHtml loadedModel.Schedule.InfoText
                 ]
+                if not isReservationEnabled then
+                    Bulma.section [
+                        View.errorNotificationWithRetry (sprintf "Die Reservierung ist ab %s möglich" (formatDate loadedModel.Schedule.ReservationStartTime)) (fun () -> dispatch LoadSchedule)
+                    ]
                 Bulma.section [
                     yield Bulma.label [ Html.text "Zeitpunkt" ]
                     let entriesByHour =
@@ -174,6 +183,7 @@ let schedule = React.functionComponent(fun () ->
                             for entry in entries ->
                                 Bulma.button.button [
                                     prop.text (sprintf "%02d:%02d" entry.StartTime.Hours entry.StartTime.Minutes)
+                                    prop.disabled (not isReservationEnabled)
                                     match entry.ReservationType with
                                     | Free link when loadedModel.ReservationLink = Some link ->
                                         yield! [
@@ -203,6 +213,7 @@ let schedule = React.functionComponent(fun () ->
                                         Bulma.input.text [
                                             prop.placeholder "Bitte geben Sie Ihren Namen an"
                                             prop.value (loadedModel.Name |> Option.map fst |> Option.defaultValue "")
+                                            prop.disabled (not isReservationEnabled)
                                             match loadedModel.Name with
                                             | Some (_, true) -> color.isSuccess
                                             | Some _ -> color.isDanger
@@ -228,6 +239,7 @@ let schedule = React.functionComponent(fun () ->
                                         Bulma.input.text [
                                             prop.placeholder "Bitte geben Sie Ihre E-Mail-Adresse an"
                                             prop.value (loadedModel.MailAddress |> Option.map fst |> Option.defaultValue "")
+                                            prop.disabled (not isReservationEnabled)
                                             match loadedModel.MailAddress with
                                             | Some (_, true) -> color.isSuccess
                                             | Some _ -> color.isDanger
@@ -252,8 +264,8 @@ let schedule = React.functionComponent(fun () ->
                                             prop.type' "submit"
                                             prop.text "Reservieren"
                                             color.isSuccess
-                                            match loadedModel.ReservationLink, loadedModel.Name, loadedModel.MailAddress with
-                                            | Some _, Some (_, true), Some (_, true) -> ()
+                                            match isReservationEnabled, loadedModel.ReservationLink, loadedModel.Name, loadedModel.MailAddress with
+                                            | true, Some _, Some (_, true), Some (_, true) -> ()
                                             | _ -> prop.disabled true
                                             if Deferred.inProgress loadedModel.BookingState then button.isLoading
                                         ]

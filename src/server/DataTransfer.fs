@@ -15,6 +15,7 @@ type ScheduleEntry = {
 
 type Schedule = {
     Date: DateTimeOffset
+    ReservationStartTime: DateTimeOffset
     InfoText: string
     Entries: ScheduleEntry list
 }
