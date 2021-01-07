@@ -2,8 +2,10 @@ module DataTransfer
 
 open System
 
+type ReservationLink = ReservationLink of string
+
 type ReservationType =
-    | Free of reservationLink: string
+    | Free of ReservationLink
     | Taken
 
 type ScheduleEntry = {

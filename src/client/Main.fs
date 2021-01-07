@@ -19,7 +19,7 @@ type UserInput<'a> = ('a * bool) option
 
 type LoadedModel = {
     Schedule: Schedule
-    ReservationLink: string option
+    ReservationLink: ReservationLink option
     Name: UserInput<string>
     MailAddress: UserInput<string>
     BookingState: Deferred<unit>
@@ -30,11 +30,11 @@ type Model = Deferred<LoadedModel>
 type Msg =
     | LoadSchedule
     | LoadScheduleResult of Result<Schedule, exn>
-    | SetReservationLink of string option
+    | SetReservationLink of ReservationLink option
     | SetName of string
     | SetMailAddress of string
     | Book
-    | BookingResult of Result<unit, exn>
+    | BookingResult of Result<ReservationLink, exn>
 
 let init =
     let state = Deferred.HasNotStartedYet
@@ -45,9 +45,8 @@ let loadSchedule = async {
     return schedule
 }
 
-let book link (data: Subscriber) = async {
-    let! (result : unit) = Fetch.``post``(link, data = data, caseStrategy = CamelCase) |> Async.AwaitPromise
-    return result
+let book (ReservationLink reservationLink) (data: Subscriber) = async {
+    do! Fetch.``post``(reservationLink, data = data, caseStrategy = CamelCase) |> Async.AwaitPromise
 }
 
 let isValidMailAddress v =
@@ -88,12 +87,25 @@ let update msg model =
         match model with
         | Deferred.Resolved ({ ReservationLink = Some reservationLink; Name = Some (name, true); MailAddress = Some (mailAddress, true) } as loadedModel) ->
             Deferred.Resolved { loadedModel with BookingState = Deferred.InProgress },
-            Cmd.OfAsync.either (fun () -> book reservationLink { Name = name; MailAddress = mailAddress }) () (Ok >> BookingResult) (Error >> BookingResult)
+            Cmd.OfAsync.either (fun () -> book reservationLink { Name = name; MailAddress = mailAddress }) () (fun () -> Ok reservationLink |> BookingResult) (Error >> BookingResult)
         | _ -> model, Cmd.none
-    | BookingResult (Ok ()) ->
+    | BookingResult (Ok reservationLink) ->
         match model with
         | Deferred.Resolved loadedModel ->
-            Deferred.Resolved { loadedModel with Name = None; MailAddress = None; BookingState = Deferred.Resolved () },
+            let scheduleEntries =
+                loadedModel.Schedule.Entries
+                |> List.map (fun entry ->
+                    if entry.ReservationType = Free reservationLink then { entry with ReservationType = Taken }
+                    else entry
+                )
+            Deferred.Resolved {
+                loadedModel with
+                    Schedule = { loadedModel.Schedule with Entries = scheduleEntries }
+                    ReservationLink = None
+                    Name = None
+                    MailAddress = None
+                    BookingState = Deferred.Resolved ()
+            },
             Cmd.none
         | _ -> model, Cmd.none
     | BookingResult (Error e) ->
