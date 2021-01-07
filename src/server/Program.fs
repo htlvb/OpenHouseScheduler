@@ -20,6 +20,16 @@ open Thoth.Json.Net
 // Web app
 // ---------------------------------
 
+type MailConfig = {
+    SmtpAddress: string
+    MailboxUserName: string
+    MailboxPassword: string
+    Sender: Mail.User
+    BccRecipient: Mail.User option
+    Subject: string
+    ContentTemplate: string
+}
+
 type AppConfig = {
     DbConnectionString: Db.ConnectionString
     Date: DateTimeOffset
@@ -27,13 +37,13 @@ type AppConfig = {
     StartTime: TimeSpan
     SlotDuration: TimeSpan
     NumberOfSlots: int
-    MailSettings: Mail.Settings
+    MailConfig: MailConfig
 }
 module AppConfig =
+    let private optEnvVar =
+        Environment.GetEnvironmentVariable >> Option.ofObj
     let private envVar name =
-        match Environment.GetEnvironmentVariable name with
-        | null -> failwithf "Environment variable \"%s\" not set" name
-        | v -> v
+        optEnvVar name |> Option.defaultWith (fun () -> failwithf "Environment variable \"%s\" not set" name)
     let private envVarAsInt name =
         let v = envVar name
         match Int32.TryParse(v) with
@@ -60,18 +70,20 @@ module AppConfig =
             StartTime = envVarAsTimeSpan "SCHEDULE_START_TIME" "hh\\:mm"
             SlotDuration = envVarAsTimeSpan "SCHEDULE_SLOT_DURATION" "hh\\:mm"
             NumberOfSlots = envVarAsInt "SCHEDULE_NUMBER_OF_SLOTS"
-            MailSettings = {
-                Mail.Settings.Sender = {
-                    Mail.MailUser.Name = envVar "MAIL_SENDER_NAME"
-                    Mail.MailUser.MailAddress = envVar "MAIL_SENDER_MAIL_ADDRESS"
+            MailConfig = {
+                SmtpAddress = envVar "MAILBOX_SMTP_ADDRESS"
+                MailboxUserName = envVar "MAILBOX_USERNAME"
+                MailboxPassword = envVar "MAILBOX_PASSWORD"
+                Sender = {
+                    Name = envVar "MAIL_SENDER_NAME"
+                    MailAddress = envVar "MAIL_SENDER_MAIL_ADDRESS"
                 }
-                Mail.Settings.BccRecipient = {
-                    Mail.MailUser.Name = envVar "MAIL_BCC_RECIPIENT_NAME"
-                    Mail.MailUser.MailAddress = envVar "MAIL_BCC_RECIPIENT_MAIL_ADDRESS"
-                }
-                Mail.Settings.MailboxUserName = envVar "MAILBOX_USERNAME"
-                Mail.Settings.MailboxPassword = envVar "MAILBOX_PASSWORD"
-                Mail.Settings.SmtpAddress = envVar "MAILBOX_SMTP_ADDRESS"
+                BccRecipient =
+                    match optEnvVar "MAIL_BCC_RECIPIENT_NAME", optEnvVar "MAIL_BCC_RECIPIENT_MAIL_ADDRESS" with
+                    | Some name, Some mailAddress -> Some { Name = name; MailAddress = mailAddress }
+                    | _ -> None
+                Subject = envVar "MAIL_SUBJECT"
+                ContentTemplate = envVar "MAIL_CONTENT_TEMPLATE"
             }
         }
 
@@ -134,23 +146,28 @@ let handlePostSchedule appConfig slotNumber : HttpHandler =
                 Db.Schedule.MailAddress = subscriber.MailAddress
                 Db.Schedule.TimeStamp = DateTime.Now
             }
-            let subject = "Anmeldung zum Tag der offenen Tür der HTL Vöcklabruck"
-            let content =
-                let startTime = getSlotStartTime appConfig.StartTime appConfig.SlotDuration slotNumber
-                sprintf """%s,
-
-vielen Dank für die Anmeldung zum Tag der offenen Tür der HTL Vöcklabruck am %s.
-Aufgrund von Covid-19 bitten wir sie, pünktlich um %s zu Ihrer persönlichen Führung zu erscheinen.
-Bei Änderungswünschen oder im Falle einer Verhinderung bitten wir sie außerdem, uns sobald wie möglich Bescheid zu geben.
-Antworten Sie dafür auf diese E-Mail bzw. kontaktieren Sie uns telefonisch unter 07672/24605.
-
-Wir freuen uns, sie bei uns begrüßen zu dürfen."""
-                    subscriber.Name (appConfig.Date.ToString("dd.MM.yyyy")) (startTime.ToString("hh\\:mm"))
-            let subscriber = {
-                Mail.MailUser.Name = subscriber.Name
-                Mail.MailUser.MailAddress = subscriber.MailAddress
+            let settings = {
+                Mail.Settings.SmtpAddress = appConfig.MailConfig.SmtpAddress
+                Mail.Settings.MailboxUserName =  appConfig.MailConfig.MailboxUserName
+                Mail.Settings.MailboxPassword =  appConfig.MailConfig.MailboxPassword
+                Mail.Settings.Sender =  appConfig.MailConfig.Sender
+                Mail.Settings.Recipient = {
+                    Mail.User.Name = subscriber.Name
+                    Mail.User.MailAddress = subscriber.MailAddress
+                }
+                Mail.Settings.BccRecipient =  appConfig.MailConfig.BccRecipient
+                Mail.Settings.Subject =  appConfig.MailConfig.Subject
+                Mail.Settings.Content =
+                    let startTime = getSlotStartTime appConfig.StartTime appConfig.SlotDuration slotNumber
+                    let templateVars = [
+                        "FullName", subscriber.Name
+                        "Date", appConfig.Date.ToString("dd.MM.yyyy")
+                        "Time", startTime.ToString("hh\\:mm")
+                    ]
+                    (appConfig.MailConfig.ContentTemplate, templateVars)
+                    ||> List.fold (fun text (varName, value) -> text.Replace(sprintf "{{{%s}}}" varName, value))
             }
-            do! Mail.sendBookingConfirmation appConfig.MailSettings subscriber subject content
+            do! Mail.sendBookingConfirmation settings
             return! Successful.OK () next ctx
         | _ -> return! RequestErrors.BAD_REQUEST () next ctx
     }

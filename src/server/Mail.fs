@@ -5,26 +5,29 @@ open MailKit.Security
 open MimeKit
 open MimeKit.Text
 
-type MailUser = {
+type User = {
     Name: string
     MailAddress: string
 }
 
 type Settings = {
-    Sender: MailUser
-    BccRecipient: MailUser
+    SmtpAddress: string
     MailboxUserName: string
     MailboxPassword: string
-    SmtpAddress: string
+    Sender: User
+    Recipient: User
+    BccRecipient: User option
+    Subject: string
+    Content: string
 }
 
-let sendBookingConfirmation mailSettings recipient subject content = async {
+let sendBookingConfirmation mailSettings = async {
     let message = MimeMessage()
     message.From.Add(MailboxAddress(mailSettings.Sender.Name, mailSettings.Sender.MailAddress))
-    message.To.Add(MailboxAddress(recipient.Name, recipient.MailAddress))
-    message.Bcc.Add(MailboxAddress(mailSettings.BccRecipient.Name, mailSettings.BccRecipient.MailAddress))
-    message.Subject <- subject
-    message.Body <- TextPart(TextFormat.Plain, Text = content)
+    message.To.Add(MailboxAddress(mailSettings.Recipient.Name, mailSettings.Recipient.MailAddress))
+    mailSettings.BccRecipient |> Option.iter (fun user -> message.Bcc.Add(MailboxAddress(user.Name, user.MailAddress)))
+    message.Subject <- mailSettings.Subject
+    message.Body <- TextPart(TextFormat.Plain, Text = mailSettings.Content)
 
     use smtp = new SmtpClient()
     let! ct = Async.CancellationToken
