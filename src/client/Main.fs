@@ -181,9 +181,10 @@ let schedule = React.functionComponent(fun () ->
                     for (_, entries) in entriesByHour ->
                         Bulma.buttons [
                             for entry in entries ->
+                                let isDisabled = not isReservationEnabled || loadedModel.Schedule.Date.Add(entry.StartTime) < System.DateTimeOffset.Now || entry.ReservationType = Taken
                                 Bulma.button.button [
                                     prop.text (sprintf "%02d:%02d" entry.StartTime.Hours entry.StartTime.Minutes)
-                                    prop.disabled (not isReservationEnabled)
+                                    prop.disabled isDisabled
                                     match entry.ReservationType with
                                     | Free link when loadedModel.ReservationLink = Some link ->
                                         yield! [
@@ -196,7 +197,6 @@ let schedule = React.functionComponent(fun () ->
                                         ]
                                     | Taken ->
                                         yield! [
-                                            prop.disabled true
                                             color.isDanger
                                         ]
                                 ]

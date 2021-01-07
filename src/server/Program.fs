@@ -140,14 +140,15 @@ module Subscriber =
 
 let handlePostSchedule appConfig slotNumber : HttpHandler =
     fun next ctx -> task {
-        if appConfig.ReservationStartTime >= DateTimeOffset.Now then
-            return! RequestErrors.BAD_REQUEST () next ctx
-        else
-            let! subscriber = ctx.BindJsonAsync<DataTransfer.Subscriber>()
-            match Subscriber.validate subscriber, slotNumber with
-            | Ok subscriber, slotNumber when slotNumber > 0 && slotNumber <= appConfig.NumberOfSlots -> 
+        let! subscriber = ctx.BindJsonAsync<DataTransfer.Subscriber>()
+        match Subscriber.validate subscriber, slotNumber with
+        | Ok subscriber, slotNumber when slotNumber > 0 && slotNumber <= appConfig.NumberOfSlots -> 
+            let slotStartTime = getSlotStartTime appConfig.StartTime appConfig.SlotDuration slotNumber
+            if appConfig.ReservationStartTime >= DateTimeOffset.Now || appConfig.Date.Add(slotStartTime) < DateTimeOffset.Now then
+                return! RequestErrors.BAD_REQUEST () next ctx
+            else
                 do! Db.book appConfig.DbConnectionString {
-                    Db.Schedule.Time = getSlotStartTime appConfig.StartTime appConfig.SlotDuration slotNumber
+                    Db.Schedule.Time = slotStartTime
                     Db.Schedule.Name = subscriber.Name
                     Db.Schedule.MailAddress = subscriber.MailAddress
                     Db.Schedule.TimeStamp = DateTime.Now
@@ -175,7 +176,7 @@ let handlePostSchedule appConfig slotNumber : HttpHandler =
                 }
                 do! Mail.sendBookingConfirmation settings
                 return! Successful.OK () next ctx
-            | _ -> return! RequestErrors.BAD_REQUEST () next ctx
+        | _ -> return! RequestErrors.BAD_REQUEST () next ctx
     }
 
 let appConfig = AppConfig.fromEnvironment ()
