@@ -162,6 +162,9 @@ let schedule = React.functionComponent(fun () ->
             header (Some loadedModel.Schedule.Date)
             Bulma.container [
                 Bulma.section [
+                    prop.innerHtml loadedModel.Schedule.InfoText
+                ]
+                Bulma.section [
                     yield Bulma.label [ Html.text "Zeitpunkt" ]
                     let entriesByHour =
                         loadedModel.Schedule.Entries

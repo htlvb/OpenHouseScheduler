@@ -4,6 +4,7 @@ open DataTransfer
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open Giraffe
 open Giraffe.Serialization
+open Markdig
 open Microsoft.AspNetCore.Builder
 open Microsoft.AspNetCore.Hosting
 open Microsoft.Extensions.DependencyInjection
@@ -22,6 +23,7 @@ open Thoth.Json.Net
 type AppConfig = {
     DbConnectionString: Db.ConnectionString
     Date: DateTimeOffset
+    InfoText: string
     StartTime: TimeSpan
     SlotDuration: TimeSpan
     NumberOfSlots: int
@@ -48,10 +50,13 @@ module AppConfig =
         | (true, v) -> v
         | _ -> failwithf "Environment variable \"%s\" can't be parsed as time span (format must be \"%s\")" name format
 
+    let private parseMarkdown = Markdown.ToHtml
+
     let fromEnvironment () =
         {
             DbConnectionString = envVar "DB_CONNECTION_STRING" |> Db.ConnectionString
             Date = envVarAsDateTime "SCHEDULE_DATE" "dd.MM.yyyy"
+            InfoText = envVar "INFO_TEXT" |> parseMarkdown
             StartTime = envVarAsTimeSpan "SCHEDULE_START_TIME" "hh\\:mm"
             SlotDuration = envVarAsTimeSpan "SCHEDULE_SLOT_DURATION" "hh\\:mm"
             NumberOfSlots = envVarAsInt "SCHEDULE_NUMBER_OF_SLOTS"
@@ -97,6 +102,7 @@ let handleGetSchedule appConfig : HttpHandler =
             )
         let schedule = {
             Date = appConfig.Date
+            InfoText = appConfig.InfoText
             Entries = scheduleEntries
         }
         return! Successful.OK schedule next ctx
