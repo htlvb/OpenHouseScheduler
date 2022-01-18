@@ -5,8 +5,12 @@ open System
 type ReservationLink = ReservationLink of string
 
 type ReservationType =
-    | Free of ReservationLink
+    | Free of maxQuantity: int * ReservationLink
     | Taken
+
+module ReservationType =
+    let free reservationsLeft slotNumber =
+        Free (reservationsLeft, ReservationLink (sprintf "api/schedule/%d" slotNumber))
 
 type ScheduleEntry = {
     StartTime: TimeSpan
@@ -21,6 +25,7 @@ type Schedule = {
 }
 
 type Subscriber = {
+    Quantity: int
     Name: string
     MailAddress: string
 }

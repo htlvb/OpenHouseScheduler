@@ -33,6 +33,7 @@ type MailConfig = {
 type AppConfig = {
     DbConnectionString: Db.ConnectionString
     ReservationStartTime: DateTimeOffset
+    ReservationsPerSlot: int
     Date: DateTimeOffset
     InfoText: string
     StartTime: TimeSpan
@@ -67,6 +68,7 @@ module AppConfig =
         {
             DbConnectionString = envVar "DB_CONNECTION_STRING" |> Db.ConnectionString
             ReservationStartTime = envVarAsDateTime "RESERVATION_START_TIME" "dd.MM.yyyy HH:mm:ss"
+            ReservationsPerSlot = envVarAsInt "SCHEDULE_RESERVATIONS_PER_SLOT"
             Date = envVarAsDateTime "SCHEDULE_DATE" "dd.MM.yyyy"
             InfoText = envVar "INFO_TEXT" |> parseMarkdown
             StartTime = envVarAsTimeSpan "SCHEDULE_START_TIME" "hh\\:mm"
@@ -92,13 +94,6 @@ module AppConfig =
 let getSlotStartTime (startTime: TimeSpan) (slotDuration: TimeSpan) slotNumber =
     startTime + slotDuration * (float <| slotNumber - 1)
 
-module Schedule =
-    let fromDb (schedule: Db.Schedule) =
-        {
-            StartTime = schedule.Time
-            ReservationType = Taken
-        }
-
 let handleGetSchedule appConfig : HttpHandler =
     fun next ctx -> task {
         let! schedule = Db.getSchedule (appConfig.DbConnectionString)
@@ -106,13 +101,21 @@ let handleGetSchedule appConfig : HttpHandler =
             [ 1..appConfig.NumberOfSlots ]
             |> List.map (fun slotNumber ->
                 let startTime = getSlotStartTime appConfig.StartTime appConfig.SlotDuration slotNumber
-                schedule
-                |> List.tryFind(fun entry -> entry.Time = startTime)
-                |> Option.map Schedule.fromDb
-                |> Option.defaultValue {
-                    StartTime = getSlotStartTime appConfig.StartTime appConfig.SlotDuration slotNumber
-                    ReservationType = Free (ReservationLink (sprintf "api/schedule/%d" slotNumber))
-                }
+                let quantityTaken =
+                    schedule
+                    |> List.filter (fun entry -> entry.Time = startTime)
+                    |> List.sumBy (fun entry -> entry.Quantity)
+                let reservationsLeft = appConfig.ReservationsPerSlot - quantityTaken
+                if reservationsLeft <= 0 then
+                    {
+                        StartTime = startTime
+                        ReservationType = Taken
+                    }
+                else
+                    {
+                        StartTime = getSlotStartTime appConfig.StartTime appConfig.SlotDuration slotNumber
+                        ReservationType = ReservationType.free reservationsLeft slotNumber
+                    }
             )
         let schedule = {
             Date = appConfig.Date
@@ -124,19 +127,24 @@ let handleGetSchedule appConfig : HttpHandler =
     }
 
 type Subscriber = {
+    Quantity: int
     Name: string
     MailAddress: string
 }
 module Subscriber =
     let validate (subscriber: DataTransfer.Subscriber) =
+        let quantityIsValid = subscriber.Quantity > 0
+        let subscriberNameIsValid = (not <| String.IsNullOrWhiteSpace subscriber.Name) && subscriber.Name.Length <= 100
         let mailAddressIsValid =
-            try
-                MailAddress subscriber.MailAddress |> ignore
-                true
-            with _ -> false
-        if String.IsNullOrWhiteSpace subscriber.Name || subscriber.Name.Length > 100 || not mailAddressIsValid || subscriber.MailAddress.Length > 100
-        then Error ()
-        else Ok { Name = subscriber.Name; MailAddress = subscriber.MailAddress }
+            let canParse =
+                try
+                    MailAddress subscriber.MailAddress |> ignore
+                    true
+                with _ -> false
+            canParse && subscriber.MailAddress.Length <= 100
+        if quantityIsValid && subscriberNameIsValid && mailAddressIsValid
+        then Ok { Quantity = subscriber.Quantity; Name = subscriber.Name; MailAddress = subscriber.MailAddress }
+        else Error ()
 
 let handlePostSchedule appConfig slotNumber : HttpHandler =
     fun next ctx -> task {
@@ -147,12 +155,16 @@ let handlePostSchedule appConfig slotNumber : HttpHandler =
             if appConfig.ReservationStartTime >= DateTimeOffset.Now || appConfig.Date.Add(slotStartTime) < DateTimeOffset.Now then
                 return! RequestErrors.BAD_REQUEST () next ctx
             else
-                do! Db.book appConfig.DbConnectionString {
+                let! reservationsLeft = Db.book appConfig.DbConnectionString appConfig.ReservationsPerSlot {
                     Db.Schedule.Time = slotStartTime
+                    Db.Schedule.Quantity = subscriber.Quantity
                     Db.Schedule.Name = subscriber.Name
                     Db.Schedule.MailAddress = subscriber.MailAddress
                     Db.Schedule.TimeStamp = DateTime.Now
                 }
+                let newReservationType =
+                    if reservationsLeft <= 0 then Taken
+                    else ReservationType.free reservationsLeft slotNumber
                 let settings = {
                     Mail.Settings.SmtpAddress = appConfig.MailConfig.SmtpAddress
                     Mail.Settings.MailboxUserName =  appConfig.MailConfig.MailboxUserName
@@ -175,7 +187,7 @@ let handlePostSchedule appConfig slotNumber : HttpHandler =
                         ||> List.fold (fun text (varName, value) -> text.Replace(sprintf "{{{%s}}}" varName, value))
                 }
                 do! Mail.sendBookingConfirmation settings
-                return! Successful.OK () next ctx
+                return! Successful.OK newReservationType next ctx
         | _ -> return! RequestErrors.BAD_REQUEST () next ctx
     }
 

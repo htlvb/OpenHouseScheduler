@@ -2,9 +2,11 @@ USE openhousescheduler
 
 CREATE TABLE schedule
 (
+    ID INTEGER NOT NULL AUTO_INCREMENT,
     Time TIME NOT NULL,
+    Quantity INTEGER NOT NULL,
     Name VARCHAR(255) NOT NULL,
     MailAddress VARCHAR(255) NOT NULL,
     TimeStamp TIMESTAMP NOT NULL,
-    PRIMARY KEY (Time)
+    PRIMARY KEY (ID)
 )

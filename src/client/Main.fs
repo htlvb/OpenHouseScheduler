@@ -19,7 +19,8 @@ type UserInput<'a> = ('a * bool) option
 
 type LoadedModel = {
     Schedule: Schedule
-    ReservationLink: ReservationLink option
+    SelectedScheduleEntry: ScheduleEntry option
+    Quantity: UserInput<int>
     Name: UserInput<string>
     MailAddress: UserInput<string>
     BookingState: Deferred<unit>
@@ -30,11 +31,12 @@ type Model = Deferred<LoadedModel>
 type Msg =
     | LoadSchedule
     | LoadScheduleResult of Result<Schedule, exn>
-    | SetReservationLink of ReservationLink option
+    | SelectScheduleEntry of ScheduleEntry option
+    | SetQuantity of int
     | SetName of string
     | SetMailAddress of string
     | Book
-    | BookingResult of Result<ReservationLink, exn>
+    | BookingResult of Result<ScheduleEntry * ReservationType, exn>
 
 let init =
     let state = Deferred.HasNotStartedYet
@@ -46,7 +48,8 @@ let loadSchedule = async {
 }
 
 let book (ReservationLink reservationLink) (data: Subscriber) = async {
-    do! Fetch.``post``(reservationLink, data = data, caseStrategy = CamelCase) |> Async.AwaitPromise
+    let! (newReservationType: ReservationType) = Fetch.``post``(reservationLink, data = data, caseStrategy = CamelCase) |> Async.AwaitPromise
+    return newReservationType
 }
 
 let isValidMailAddress v =
@@ -61,17 +64,30 @@ let update msg model =
     | LoadScheduleResult (Ok schedule) ->
         Deferred.Resolved {
             Schedule = schedule
-            ReservationLink = None
+            SelectedScheduleEntry = None
+            Quantity = None
             Name = None
             MailAddress = None
             BookingState = Deferred.HasNotStartedYet
         }, Cmd.none
     | LoadScheduleResult (Error e) ->
         Deferred.Failed e, Cmd.none
-    | SetReservationLink link ->
+    | SelectScheduleEntry scheduleEntry ->
         model
         |> Deferred.map (fun loadedModel ->
-            { loadedModel with ReservationLink = link }
+            { loadedModel with
+                SelectedScheduleEntry = scheduleEntry
+                Quantity =
+                    match scheduleEntry, loadedModel.Quantity with
+                    | Some { ReservationType = Free (maxQuantity, _reservationLink) }, Some (quantity, true) when maxQuantity >= quantity -> loadedModel.Quantity
+                    | None, _ -> loadedModel.Quantity
+                    | _ -> None
+            }
+        ), Cmd.none
+    | SetQuantity quantity ->
+        model
+        |> Deferred.map (fun loadedModel ->
+            { loadedModel with Quantity = Some (quantity, true) }
         ), Cmd.none
     | SetName name ->
         model
@@ -85,23 +101,24 @@ let update msg model =
         ), Cmd.none
     | Book ->
         match model with
-        | Deferred.Resolved ({ ReservationLink = Some reservationLink; Name = Some (name, true); MailAddress = Some (mailAddress, true) } as loadedModel) ->
+        | Deferred.Resolved ({ SelectedScheduleEntry = Some ({ ReservationType = Free (maxQuantity, reservationLink) } as selectedScheduleEntry); Quantity = Some (quantity, true); Name = Some (name, true); MailAddress = Some (mailAddress, true) } as loadedModel) when maxQuantity >= quantity ->
             Deferred.Resolved { loadedModel with BookingState = Deferred.InProgress },
-            Cmd.OfAsync.either (fun () -> book reservationLink { Name = name; MailAddress = mailAddress }) () (fun () -> Ok reservationLink |> BookingResult) (Error >> BookingResult)
+            Cmd.OfAsync.either (fun () -> book reservationLink { Quantity = quantity; Name = name; MailAddress = mailAddress }) () (fun reservationType -> Ok (selectedScheduleEntry, reservationType) |> BookingResult) (Error >> BookingResult)
         | _ -> model, Cmd.none
-    | BookingResult (Ok reservationLink) ->
+    | BookingResult (Ok (selectedScheduleEntry, newReservationType)) ->
         match model with
         | Deferred.Resolved loadedModel ->
             let scheduleEntries =
                 loadedModel.Schedule.Entries
                 |> List.map (fun entry ->
-                    if entry.ReservationType = Free reservationLink then { entry with ReservationType = Taken }
+                    if entry = selectedScheduleEntry then { entry with ReservationType = newReservationType }
                     else entry
                 )
             Deferred.Resolved {
                 loadedModel with
                     Schedule = { loadedModel.Schedule with Entries = scheduleEntries }
-                    ReservationLink = None
+                    SelectedScheduleEntry = None
+                    Quantity = None
                     Name = None
                     MailAddress = None
                     BookingState = Deferred.Resolved ()
@@ -174,7 +191,7 @@ let schedule = React.functionComponent(fun () ->
                         View.errorNotificationWithRetry (sprintf "Die Reservierung ist ab %s möglich" (formatDate loadedModel.Schedule.ReservationStartTime)) (fun () -> dispatch LoadSchedule)
                     ]
                 Bulma.section [
-                    yield Bulma.label [ Html.text "Zeitpunkt" ]
+                    yield Bulma.label [ Html.text "Zeitpunkt / freie Plätze" ]
                     let entriesByHour =
                         loadedModel.Schedule.Entries
                         |> List.groupBy (fun e -> e.StartTime.Hours)
@@ -182,21 +199,24 @@ let schedule = React.functionComponent(fun () ->
                         Bulma.buttons [
                             for entry in entries ->
                                 let isDisabled = not isReservationEnabled || loadedModel.Schedule.Date.Add(entry.StartTime) < System.DateTimeOffset.Now || entry.ReservationType = Taken
-                                Bulma.button.button [
-                                    prop.text (sprintf "%02d:%02d" entry.StartTime.Hours entry.StartTime.Minutes)
+                                let text = sprintf "%02d:%02d" entry.StartTime.Hours entry.StartTime.Minutes
+                                Bulma.button.a [
                                     prop.disabled isDisabled
                                     match entry.ReservationType with
-                                    | Free link when loadedModel.ReservationLink = Some link ->
+                                    | Free (maxQuantity, _link) when loadedModel.SelectedScheduleEntry = Some entry ->
                                         yield! [
-                                            prop.onClick (fun _ -> dispatch (SetReservationLink None))
+                                            prop.text (sprintf "%s | %d P." text maxQuantity)
+                                            prop.onClick (fun _ -> dispatch (SelectScheduleEntry None))
                                             color.isSuccess
                                         ]
-                                    | Free link ->
+                                    | Free (maxQuantity, _link) ->
                                         yield! [
-                                            prop.onClick (fun _ -> dispatch (SetReservationLink (Some link)))
+                                            prop.text (sprintf "%s | %d P." text maxQuantity)
+                                            prop.onClick (fun _ -> dispatch (SelectScheduleEntry (Some entry)))
                                         ]
                                     | Taken ->
                                         yield! [
+                                            prop.text (sprintf "%s | 0 P." text)
                                             color.isDanger
                                         ]
                                 ]
@@ -204,6 +224,30 @@ let schedule = React.functionComponent(fun () ->
                     yield Html.form [
                         prop.onSubmit (fun e -> e.preventDefault(); dispatch Book)
                         prop.children [
+                            Bulma.field.div [
+                                Bulma.label [ Html.text "Anzahl Personen" ]
+                                Bulma.buttons [
+                                    let maxQuantity =
+                                        match loadedModel.SelectedScheduleEntry with
+                                        | Some { ReservationType = Free (maxQuantity, _reservationLink) } -> maxQuantity
+                                        | _ ->
+                                            loadedModel.Schedule.Entries
+                                            |> List.choose (fun entry ->
+                                                match entry.ReservationType with
+                                                | Free (maxQuantity, _reservationLink) -> Some maxQuantity
+                                                | _ -> None
+                                            )
+                                            |> List.max
+                                    for quantity in [1..maxQuantity] ->
+                                        Bulma.button.a [
+                                            prop.onClick (fun _ -> dispatch (SetQuantity quantity))
+                                            match loadedModel.Quantity with
+                                            | Some (c, true) when c = quantity -> color.isSuccess
+                                            | _ -> ()
+                                            prop.textf "%d" quantity
+                                        ]
+                                ]
+                            ]
                             Bulma.field.div [
                                 Bulma.label [ Html.text "Name" ]
                                 Bulma.control.div [
@@ -264,8 +308,8 @@ let schedule = React.functionComponent(fun () ->
                                             prop.type' "submit"
                                             prop.text "Reservieren"
                                             color.isSuccess
-                                            match isReservationEnabled, loadedModel.ReservationLink, loadedModel.Name, loadedModel.MailAddress with
-                                            | true, Some _, Some (_, true), Some (_, true) -> ()
+                                            match isReservationEnabled, loadedModel.SelectedScheduleEntry, loadedModel.Quantity, loadedModel.Name, loadedModel.MailAddress with
+                                            | true, Some _, Some (_, true), Some (_, true), Some (_, true) -> ()
                                             | _ -> prop.disabled true
                                             if Deferred.inProgress loadedModel.BookingState then button.isLoading
                                         ]
