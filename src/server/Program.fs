@@ -31,10 +31,12 @@ type MailConfig = {
 }
 
 type AppConfig = {
+    Culture: CultureInfo
     DbConnectionString: Db.ConnectionString
+    Title: string
     ReservationStartTime: DateTimeOffset
     ReservationsPerSlot: int
-    Date: DateTimeOffset
+    Dates: DateTimeOffset list
     InfoText: string
     StartTime: TimeSpan
     SlotDuration: TimeSpan
@@ -42,34 +44,51 @@ type AppConfig = {
     MailConfig: MailConfig
 }
 module AppConfig =
+    let private tryParseInt (text: string) =
+        match Int32.TryParse(text) with
+        | (true, v) -> Some v
+        | _ -> None
+    let private tryParseDateTime (format: string) (text: string) =
+        match DateTimeOffset.TryParseExact(text, format, CultureInfo.InvariantCulture, DateTimeStyles.None) with
+        | (true, v) -> Some v
+        | _ -> None
+    let private tryParseTimeSpan (format: string) (text: string) =
+        match TimeSpan.TryParseExact(text, format, CultureInfo.InvariantCulture) with
+        | (true, v) -> Some v
+        | _ -> None
+
     let private optEnvVar =
         Environment.GetEnvironmentVariable >> Option.ofObj
     let private envVar name =
         optEnvVar name |> Option.defaultWith (fun () -> failwithf "Environment variable \"%s\" not set" name)
+    let private envVarList (separator: string) name parse =
+        let value = envVar name
+        value.Split(separator)
+        |> Seq.map (parse >> Option.defaultWith (fun () -> failwithf "Environment variable \"%s\" can't be parsed as list" name))
+        |> Seq.toList
     let private envVarAsInt name =
-        let v = envVar name
-        match Int32.TryParse(v) with
-        | (true, v) -> v
-        | _ -> failwithf "Environment variable \"%s\" can't be parsed as integer" name
-    let private envVarAsDateTime name (format: string) =
-        let v = envVar name
-        match DateTimeOffset.TryParseExact(v, format, CultureInfo.InvariantCulture, DateTimeStyles.None) with
-        | (true, v) -> v
-        | _ -> failwithf "Environment variable \"%s\" can't be parsed as date time (format must be \"%s\")" name format
-    let private envVarAsTimeSpan name (format: string) =
-        let v = envVar name
-        match TimeSpan.TryParseExact(v, format, CultureInfo.InvariantCulture) with
-        | (true, v) -> v
-        | _ -> failwithf "Environment variable \"%s\" can't be parsed as time span (format must be \"%s\")" name format
+        envVar name
+        |> tryParseInt
+        |> Option.defaultWith (fun () -> failwithf "Environment variable \"%s\" can't be parsed as integer" name)
+    let private envVarAsDateTime name format =
+        envVar name
+        |> tryParseDateTime format
+        |> Option.defaultWith (fun () -> failwithf "Environment variable \"%s\" can't be parsed as date time (format must be \"%s\")" name format)
+    let private envVarAsTimeSpan name format =
+        envVar name
+        |> tryParseTimeSpan format
+        |> Option.defaultWith (fun () -> failwithf "Environment variable \"%s\" can't be parsed as time span (format must be \"%s\")" name format)
 
     let private parseMarkdown = Markdown.ToHtml
 
     let fromEnvironment () =
         {
+            Culture = CultureInfo.GetCultureInfo("de-AT")
             DbConnectionString = envVar "DB_CONNECTION_STRING" |> Db.ConnectionString
+            Title = envVar "APP_TITLE"
             ReservationStartTime = envVarAsDateTime "RESERVATION_START_TIME" "dd.MM.yyyy HH:mm:ss"
             ReservationsPerSlot = envVarAsInt "SCHEDULE_RESERVATIONS_PER_SLOT"
-            Date = envVarAsDateTime "SCHEDULE_DATE" "dd.MM.yyyy"
+            Dates = envVarList "," "SCHEDULE_DATES" (tryParseDateTime "dd.MM.yyyy")
             InfoText = envVar "INFO_TEXT" |> parseMarkdown
             StartTime = envVarAsTimeSpan "SCHEDULE_START_TIME" "hh\\:mm"
             SlotDuration = envVarAsTimeSpan "SCHEDULE_SLOT_DURATION" "hh\\:mm"
@@ -91,34 +110,36 @@ module AppConfig =
             }
         }
 
-let getSlotStartTime (startTime: TimeSpan) (slotDuration: TimeSpan) slotNumber =
-    startTime + slotDuration * (float <| slotNumber - 1)
+let getSlotStartTime (date: DateTimeOffset) (startTime: TimeSpan) (slotDuration: TimeSpan) slotNumber =
+    date + startTime + slotDuration * (float <| slotNumber - 1)
 
 let handleGetSchedule appConfig : HttpHandler =
     fun next ctx -> task {
         let! schedule = Db.getSchedule (appConfig.DbConnectionString)
         let scheduleEntries =
-            [ 1..appConfig.NumberOfSlots ]
-            |> List.map (fun slotNumber ->
-                let startTime = getSlotStartTime appConfig.StartTime appConfig.SlotDuration slotNumber
-                let quantityTaken =
-                    schedule
-                    |> List.filter (fun entry -> entry.Time = startTime)
-                    |> List.sumBy (fun entry -> entry.Quantity)
-                let reservationsLeft = appConfig.ReservationsPerSlot - quantityTaken
-                if reservationsLeft <= 0 then
-                    {
-                        StartTime = startTime
-                        ReservationType = Taken
-                    }
-                else
-                    {
-                        StartTime = getSlotStartTime appConfig.StartTime appConfig.SlotDuration slotNumber
-                        ReservationType = ReservationType.free reservationsLeft slotNumber
-                    }
-            )
+            [
+                for date in appConfig.Dates do
+                for slotNumber in [1..appConfig.NumberOfSlots] do
+                    let startTime = getSlotStartTime date appConfig.StartTime appConfig.SlotDuration slotNumber
+                    let quantityTaken =
+                        schedule
+                        |> List.filter (fun entry -> DateTimeOffset(entry.Time) = startTime)
+                        |> List.sumBy (fun entry -> entry.Quantity)
+                    let reservationsLeft = appConfig.ReservationsPerSlot - quantityTaken
+                    if reservationsLeft <= 0 then
+                        {
+                            StartTime = startTime
+                            ReservationType = Taken
+                        }
+                    else
+                        {
+                            StartTime = startTime
+                            ReservationType = ReservationType.free reservationsLeft date slotNumber
+                        }
+            ]
         let schedule = {
-            Date = appConfig.Date
+            Title = appConfig.Title
+            Dates = appConfig.Dates
             ReservationStartTime = appConfig.ReservationStartTime
             InfoText = appConfig.InfoText
             Entries = scheduleEntries
@@ -146,17 +167,17 @@ module Subscriber =
         then Ok { Quantity = subscriber.Quantity; Name = subscriber.Name; MailAddress = subscriber.MailAddress }
         else Error ()
 
-let handlePostSchedule appConfig slotNumber : HttpHandler =
+let handlePostSchedule appConfig date slotNumber : HttpHandler =
     fun next ctx -> task {
         let! subscriber = ctx.BindJsonAsync<DataTransfer.Subscriber>()
-        match Subscriber.validate subscriber, slotNumber with
-        | Ok subscriber, slotNumber when slotNumber > 0 && slotNumber <= appConfig.NumberOfSlots -> 
-            let slotStartTime = getSlotStartTime appConfig.StartTime appConfig.SlotDuration slotNumber
-            if appConfig.ReservationStartTime >= DateTimeOffset.Now || appConfig.Date.Add(slotStartTime) < DateTimeOffset.Now then
+        match Subscriber.validate subscriber with
+        | Ok subscriber when appConfig.Dates |> List.contains date && slotNumber > 0 && slotNumber <= appConfig.NumberOfSlots -> 
+            let slotStartTime = getSlotStartTime date appConfig.StartTime appConfig.SlotDuration slotNumber
+            if DateTimeOffset.Now < appConfig.ReservationStartTime || DateTimeOffset.Now > slotStartTime then
                 return! RequestErrors.BAD_REQUEST () next ctx
             else
                 let! reservationsLeft = Db.book appConfig.DbConnectionString appConfig.ReservationsPerSlot {
-                    Db.Schedule.Time = slotStartTime
+                    Db.Schedule.Time = slotStartTime.DateTime
                     Db.Schedule.Quantity = subscriber.Quantity
                     Db.Schedule.Name = subscriber.Name
                     Db.Schedule.MailAddress = subscriber.MailAddress
@@ -164,7 +185,7 @@ let handlePostSchedule appConfig slotNumber : HttpHandler =
                 }
                 let newReservationType =
                     if reservationsLeft <= 0 then Taken
-                    else ReservationType.free reservationsLeft slotNumber
+                    else ReservationType.free reservationsLeft date slotNumber
                 let settings = {
                     Mail.Settings.SmtpAddress = appConfig.MailConfig.SmtpAddress
                     Mail.Settings.MailboxUserName =  appConfig.MailConfig.MailboxUserName
@@ -177,11 +198,10 @@ let handlePostSchedule appConfig slotNumber : HttpHandler =
                     Mail.Settings.BccRecipient =  appConfig.MailConfig.BccRecipient
                     Mail.Settings.Subject =  appConfig.MailConfig.Subject
                     Mail.Settings.Content =
-                        let startTime = getSlotStartTime appConfig.StartTime appConfig.SlotDuration slotNumber
                         let templateVars = [
                             "FullName", subscriber.Name
-                            "Date", appConfig.Date.ToString("dd.MM.yyyy")
-                            "Time", startTime.ToString("hh\\:mm")
+                            "Date", slotStartTime.ToString("d", appConfig.Culture)
+                            "Time", slotStartTime.ToString("t", appConfig.Culture)
                         ]
                         (appConfig.MailConfig.ContentTemplate, templateVars)
                         ||> List.fold (fun text (varName, value) -> text.Replace(sprintf "{{{%s}}}" varName, value))
@@ -201,7 +221,10 @@ let webApp =
                     route "/schedule" >=> handleGetSchedule appConfig
                 ]
                 POST >=> choose [
-                    routef "/schedule/%i" (fun slotNumber -> handlePostSchedule appConfig slotNumber)
+                    routef "/schedule/%i/%i/%i/%i" (fun (year, month, day, slotNumber) ->
+                        let date = DateTimeOffset(DateTime(year, month, day))
+                        handlePostSchedule appConfig date slotNumber
+                    )
                 ]
             ])
         setStatusCode 404 >=> text "Not Found" ]

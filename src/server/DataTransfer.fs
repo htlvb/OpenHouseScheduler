@@ -9,16 +9,17 @@ type ReservationType =
     | Taken
 
 module ReservationType =
-    let free reservationsLeft slotNumber =
-        Free (reservationsLeft, ReservationLink (sprintf "api/schedule/%d" slotNumber))
+    let free reservationsLeft (date: DateTimeOffset) slotNumber =
+        Free (reservationsLeft, ReservationLink (sprintf "api/schedule/%d/%d/%d/%d" date.Year date.Month date.Day slotNumber))
 
 type ScheduleEntry = {
-    StartTime: TimeSpan
+    StartTime: DateTimeOffset
     ReservationType: ReservationType
 }
 
 type Schedule = {
-    Date: DateTimeOffset
+    Title: string
+    Dates: DateTimeOffset list
     ReservationStartTime: DateTimeOffset
     InfoText: string
     Entries: ScheduleEntry list

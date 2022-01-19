@@ -7,7 +7,7 @@ open System
 type ConnectionString = ConnectionString of string
 
 type Schedule = {
-    Time: TimeSpan
+    Time: DateTime
     Quantity: int
     Name: string
     MailAddress: string

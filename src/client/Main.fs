@@ -19,6 +19,7 @@ type UserInput<'a> = ('a * bool) option
 
 type LoadedModel = {
     Schedule: Schedule
+    SelectedDate: System.DateTime
     SelectedScheduleEntry: ScheduleEntry option
     Quantity: UserInput<int>
     Name: UserInput<string>
@@ -31,6 +32,7 @@ type Model = Deferred<LoadedModel>
 type Msg =
     | LoadSchedule
     | LoadScheduleResult of Result<Schedule, exn>
+    | SelectDate of System.DateTime
     | SelectScheduleEntry of ScheduleEntry option
     | SetQuantity of int
     | SetName of string
@@ -64,6 +66,7 @@ let update msg model =
     | LoadScheduleResult (Ok schedule) ->
         Deferred.Resolved {
             Schedule = schedule
+            SelectedDate = schedule.Dates.Head.Date
             SelectedScheduleEntry = None
             Quantity = None
             Name = None
@@ -72,6 +75,14 @@ let update msg model =
         }, Cmd.none
     | LoadScheduleResult (Error e) ->
         Deferred.Failed e, Cmd.none
+    | SelectDate date ->
+        model
+        |> Deferred.map (fun loadedModel ->
+            { loadedModel with
+                SelectedDate = date
+                SelectedScheduleEntry = None
+            }
+        ), Cmd.none
     | SelectScheduleEntry scheduleEntry ->
         model
         |> Deferred.map (fun loadedModel ->
@@ -139,7 +150,7 @@ let formatDate (date: System.DateTimeOffset) =
 let schedule = React.functionComponent(fun () ->
     let (state, dispatch) = React.useElmish(init, update, [||])
 
-    let header (date: System.DateTimeOffset option) =
+    let header data =
         Bulma.hero [
             color.isPrimary
             prop.children [
@@ -157,11 +168,15 @@ let schedule = React.functionComponent(fun () ->
                                 ]
                                 Bulma.levelItem [
                                     Bulma.title.h1 [
-                                        match date with
-                                        | Some date ->
-                                            Html.text (sprintf "Tag der offenen Tür am %s" (date.ToString("dd.MM.yyyy")))
+                                        match data with
+                                        | Some (title, [date: System.DateTimeOffset]) ->
+                                            Html.text (sprintf "%s am %s" title (date.ToString("dd.MM.yyyy")))
+                                        | Some (title, dates: System.DateTimeOffset list) ->
+                                            let startDate = List.min dates
+                                            let endDate = List.max dates
+                                            Html.text (sprintf "%s von %s bis %s" title (startDate.ToString("dd.MM.yyyy")) (endDate.ToString("dd.MM.yyyy")))
                                         | None ->
-                                            Html.text (sprintf "Tag der offenen Tür")
+                                            ()
                                     ]
                                 ]
                             ]
@@ -181,7 +196,7 @@ let schedule = React.functionComponent(fun () ->
     | Deferred.Resolved loadedModel ->
         let isReservationEnabled = loadedModel.Schedule.ReservationStartTime <= System.DateTimeOffset.UtcNow
         [
-            header (Some loadedModel.Schedule.Date)
+            header (Some (loadedModel.Schedule.Title, loadedModel.Schedule.Dates))
             Bulma.container [
                 Bulma.section [
                     prop.innerHtml loadedModel.Schedule.InfoText
@@ -191,40 +206,58 @@ let schedule = React.functionComponent(fun () ->
                         View.errorNotificationWithRetry (sprintf "Die Reservierung ist ab %s möglich" (formatDate loadedModel.Schedule.ReservationStartTime)) (fun () -> dispatch LoadSchedule)
                     ]
                 Bulma.section [
-                    yield Bulma.label [ Html.text "Zeitpunkt / freie Plätze" ]
-                    let entriesByHour =
-                        loadedModel.Schedule.Entries
-                        |> List.groupBy (fun e -> e.StartTime.Hours)
-                    for (_, entries) in entriesByHour ->
-                        Bulma.buttons [
-                            for entry in entries ->
-                                let isDisabled = not isReservationEnabled || loadedModel.Schedule.Date.Add(entry.StartTime) < System.DateTimeOffset.Now || entry.ReservationType = Taken
-                                let text = sprintf "%02d:%02d" entry.StartTime.Hours entry.StartTime.Minutes
-                                Bulma.button.a [
-                                    prop.disabled isDisabled
-                                    match entry.ReservationType with
-                                    | Free (maxQuantity, _link) when loadedModel.SelectedScheduleEntry = Some entry ->
-                                        yield! [
-                                            prop.text (sprintf "%s | %d P." text maxQuantity)
-                                            prop.onClick (fun _ -> dispatch (SelectScheduleEntry None))
-                                            color.isSuccess
-                                        ]
-                                    | Free (maxQuantity, _link) ->
-                                        yield! [
-                                            prop.text (sprintf "%s | %d P." text maxQuantity)
-                                            prop.onClick (fun _ -> dispatch (SelectScheduleEntry (Some entry)))
-                                        ]
-                                    | Taken ->
-                                        yield! [
-                                            prop.text (sprintf "%s | 0 P." text)
-                                            color.isDanger
-                                        ]
-                                ]
-                        ]
-                    yield Html.form [
+                    Html.form [
                         prop.onSubmit (fun e -> e.preventDefault(); dispatch Book)
                         prop.children [
-                            Bulma.field.div [
+                            yield Bulma.label [ Html.text "Zeitpunkt / freie Plätze" ]
+                            let groupedEntries =
+                                loadedModel.Schedule.Entries
+                                |> List.groupBy (fun e -> e.StartTime.Date)
+                                |> List.map (fun (key, entries) ->
+                                    let entriesByHour =
+                                        entries
+                                        |> List.groupBy (fun e -> e.StartTime.TimeOfDay.Hours)
+                                    (key, entriesByHour)
+                                )
+                            yield Bulma.buttons [
+                                for (date, _) in groupedEntries ->
+                                    Bulma.button.a [
+                                        prop.text (date.ToString("dd.MM.yyyy"))
+                                        button.isLarge
+                                        prop.onClick (fun _ -> dispatch (SelectDate date))
+                                        if loadedModel.SelectedDate = date then
+                                            color.isSuccess
+                                    ]
+                            ]
+                            yield Html.hr []
+                            for (_, entries) in groupedEntries |> List.find (fun (date, _) -> date = loadedModel.SelectedDate) |> snd ->
+                                Bulma.buttons [
+                                    for entry in entries ->
+                                        let isDisabled = not isReservationEnabled || entry.StartTime < System.DateTimeOffset.Now || entry.ReservationType = Taken
+                                        let text = sprintf "%02d:%02d" entry.StartTime.TimeOfDay.Hours entry.StartTime.TimeOfDay.Minutes
+                                        Bulma.button.a [
+                                            prop.disabled isDisabled
+                                            match entry.ReservationType with
+                                            | Free (maxQuantity, _link) when loadedModel.SelectedScheduleEntry = Some entry ->
+                                                yield! [
+                                                    prop.text (sprintf "%s | %d P." text maxQuantity)
+                                                    prop.onClick (fun _ -> dispatch (SelectScheduleEntry None))
+                                                    color.isSuccess
+                                                ]
+                                            | Free (maxQuantity, _link) ->
+                                                yield! [
+                                                    prop.text (sprintf "%s | %d P." text maxQuantity)
+                                                    prop.onClick (fun _ -> dispatch (SelectScheduleEntry (Some entry)))
+                                                ]
+                                            | Taken ->
+                                                yield! [
+                                                    prop.text (sprintf "%s | 0 P." text)
+                                                    color.isDanger
+                                                ]
+                                        ]
+                                ]
+                    
+                            yield Bulma.field.div [
                                 Bulma.label [ Html.text "Anzahl Personen" ]
                                 Bulma.buttons [
                                     let maxQuantity =
@@ -248,7 +281,7 @@ let schedule = React.functionComponent(fun () ->
                                         ]
                                 ]
                             ]
-                            Bulma.field.div [
+                            yield Bulma.field.div [
                                 Bulma.label [ Html.text "Name" ]
                                 Bulma.control.div [
                                     control.hasIconsLeft
@@ -274,7 +307,7 @@ let schedule = React.functionComponent(fun () ->
                                     ]
                                 ]
                             ]
-                            Bulma.field.div [
+                            yield Bulma.field.div [
                                 Bulma.label [ Html.text "E-Mail-Adresse" ]
                                 Bulma.control.div [
                                     control.hasIconsLeft
@@ -301,7 +334,7 @@ let schedule = React.functionComponent(fun () ->
                                 ]
                             ]
 
-                            Bulma.level [
+                            yield Bulma.level [
                                 Bulma.levelLeft [
                                     Bulma.levelItem [
                                         Bulma.button.button [
