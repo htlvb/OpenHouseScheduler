@@ -24,6 +24,7 @@ type LoadedModel = {
     Quantity: UserInput<int>
     Name: UserInput<string>
     MailAddress: UserInput<string>
+    PhoneNumber: UserInput<string>
     BookingState: Deferred<unit>
 }
 
@@ -37,6 +38,7 @@ type Msg =
     | SetQuantity of int
     | SetName of string
     | SetMailAddress of string
+    | SetPhoneNumber of string
     | Book
     | BookingResult of Result<ScheduleEntry * ReservationType, exn>
 
@@ -71,6 +73,7 @@ let update msg model =
             Quantity = None
             Name = None
             MailAddress = None
+            PhoneNumber = None
             BookingState = Deferred.HasNotStartedYet
         }, Cmd.none
     | LoadScheduleResult (Error e) ->
@@ -110,11 +113,16 @@ let update msg model =
         |> Deferred.map (fun loadedModel ->
             { loadedModel with MailAddress = Some (mailAddress, isValidMailAddress mailAddress) }
         ), Cmd.none
+    | SetPhoneNumber phoneNumber ->
+        model
+        |> Deferred.map (fun loadedModel ->
+            { loadedModel with PhoneNumber = Some (phoneNumber, not <| System.String.IsNullOrWhiteSpace phoneNumber) }
+        ), Cmd.none
     | Book ->
         match model with
-        | Deferred.Resolved ({ SelectedScheduleEntry = Some ({ ReservationType = Free (maxQuantity, reservationLink) } as selectedScheduleEntry); Quantity = Some (quantity, true); Name = Some (name, true); MailAddress = Some (mailAddress, true) } as loadedModel) when maxQuantity >= quantity ->
+        | Deferred.Resolved ({ SelectedScheduleEntry = Some ({ ReservationType = Free (maxQuantity, reservationLink) } as selectedScheduleEntry); Quantity = Some (quantity, true); Name = Some (name, true); MailAddress = Some (mailAddress, true); PhoneNumber = Some (phoneNumber, true) } as loadedModel) when maxQuantity >= quantity ->
             Deferred.Resolved { loadedModel with BookingState = Deferred.InProgress },
-            Cmd.OfAsync.either (fun () -> book reservationLink { Quantity = quantity; Name = name; MailAddress = mailAddress }) () (fun reservationType -> Ok (selectedScheduleEntry, reservationType) |> BookingResult) (Error >> BookingResult)
+            Cmd.OfAsync.either (fun () -> book reservationLink { Quantity = quantity; Name = name; MailAddress = mailAddress; PhoneNumber = phoneNumber }) () (fun reservationType -> Ok (selectedScheduleEntry, reservationType) |> BookingResult) (Error >> BookingResult)
         | _ -> model, Cmd.none
     | BookingResult (Ok (selectedScheduleEntry, newReservationType)) ->
         match model with
@@ -132,6 +140,7 @@ let update msg model =
                     Quantity = None
                     Name = None
                     MailAddress = None
+                    PhoneNumber = None
                     BookingState = Deferred.Resolved ()
             },
             Cmd.none
@@ -334,6 +343,33 @@ let schedule = React.functionComponent(fun () ->
                                 ]
                             ]
 
+                            yield Bulma.field.div [
+                                Bulma.label [ Html.text "Telefonnummer" ]
+                                Bulma.control.div [
+                                    control.hasIconsLeft
+                                    control.hasIconsRight
+                                    prop.children [
+                                        Bulma.input.text [
+                                            prop.placeholder "Bitte geben Sie Ihre Telefonnummer an"
+                                            prop.value (loadedModel.PhoneNumber |> Option.map fst |> Option.defaultValue "")
+                                            prop.disabled (not isReservationEnabled)
+                                            match loadedModel.PhoneNumber with
+                                            | Some (_, true) -> color.isSuccess
+                                            | Some _ -> color.isDanger
+                                            | None -> ()
+                                            prop.onChange (fun (e: Browser.Types.Event) -> dispatch (SetPhoneNumber e.target?value))
+                                        ]
+                                        Bulma.icon [
+                                            icon.isSmall
+                                            icon.isLeft
+                                            prop.children [
+                                                Fa.i [ Fa.Solid.PhoneAlt ] []
+                                            ]
+                                        ]
+                                    ]
+                                ]
+                            ]
+
                             yield Bulma.level [
                                 Bulma.levelLeft [
                                     Bulma.levelItem [
@@ -341,8 +377,8 @@ let schedule = React.functionComponent(fun () ->
                                             prop.type' "submit"
                                             prop.text "Reservieren"
                                             color.isSuccess
-                                            match isReservationEnabled, loadedModel.SelectedScheduleEntry, loadedModel.Quantity, loadedModel.Name, loadedModel.MailAddress with
-                                            | true, Some _, Some (_, true), Some (_, true), Some (_, true) -> ()
+                                            match isReservationEnabled, loadedModel.SelectedScheduleEntry, loadedModel.Quantity, loadedModel.Name, loadedModel.MailAddress, loadedModel.PhoneNumber with
+                                            | true, Some _, Some (_, true), Some (_, true), Some (_, true), Some (_, true) -> ()
                                             | _ -> prop.disabled true
                                             if Deferred.inProgress loadedModel.BookingState then button.isLoading
                                         ]

@@ -29,4 +29,5 @@ type Subscriber = {
     Quantity: int
     Name: string
     MailAddress: string
+    PhoneNumber: string
 }

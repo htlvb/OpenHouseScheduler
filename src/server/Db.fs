@@ -11,6 +11,7 @@ type Schedule = {
     Quantity: int
     Name: string
     MailAddress: string
+    PhoneNumber: string
     TimeStamp: DateTime
 }
 
@@ -19,7 +20,7 @@ let private createConnection (ConnectionString connectionString) =
 
 let getSchedule dbConfig = async {
     use connection = createConnection dbConfig
-    let! result = connection.QueryAsync<Schedule>("SELECT Time, Quantity, Name, MailAddress, TimeStamp FROM schedule") |> Async.AwaitTask
+    let! result = connection.QueryAsync<Schedule>("SELECT Time, Quantity, Name, MailAddress, PhoneNumber, TimeStamp FROM schedule") |> Async.AwaitTask
     return Seq.toList result
 }
 
@@ -33,7 +34,7 @@ let book dbConfig maxQuantity (data: Schedule) = async {
     let reservationsLeft = maxQuantity - (sumQuantity + data.Quantity)
     if reservationsLeft < 0 then
         failwithf "Can't save booking because max quantity would be exceeded (%d + %d > %d)" sumQuantity data.Quantity maxQuantity
-    do! connection.ExecuteAsync("INSERT INTO schedule (Time, Quantity, Name, MailAddress, TimeStamp) VALUES (@Time, @Quantity, @Name, @MailAddress, @TimeStamp)", data) |> Async.AwaitTask |> Async.Ignore
+    do! connection.ExecuteAsync("INSERT INTO schedule (Time, Quantity, Name, MailAddress, PhoneNumber, TimeStamp) VALUES (@Time, @Quantity, @Name, @MailAddress, @PhoneNumber, @TimeStamp)", data) |> Async.AwaitTask |> Async.Ignore
     do! connection.ExecuteAsync("UNLOCK TABLES") |> Async.AwaitTask |> Async.Ignore
     return reservationsLeft
 }

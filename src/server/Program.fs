@@ -163,8 +163,9 @@ module Subscriber =
                     true
                 with _ -> false
             canParse && subscriber.MailAddress.Length <= 100
-        if quantityIsValid && subscriberNameIsValid && mailAddressIsValid
-        then Ok { Quantity = subscriber.Quantity; Name = subscriber.Name; MailAddress = subscriber.MailAddress }
+        let phoneNumberIsValid = (not <| String.IsNullOrWhiteSpace subscriber.PhoneNumber) && subscriber.PhoneNumber.Length <= 100
+        if quantityIsValid && subscriberNameIsValid && mailAddressIsValid && phoneNumberIsValid
+        then Ok { Quantity = subscriber.Quantity; Name = subscriber.Name; MailAddress = subscriber.MailAddress; PhoneNumber = subscriber.PhoneNumber }
         else Error ()
 
 let handlePostSchedule appConfig date slotNumber : HttpHandler =
@@ -181,6 +182,7 @@ let handlePostSchedule appConfig date slotNumber : HttpHandler =
                     Db.Schedule.Quantity = subscriber.Quantity
                     Db.Schedule.Name = subscriber.Name
                     Db.Schedule.MailAddress = subscriber.MailAddress
+                    Db.Schedule.PhoneNumber = subscriber.PhoneNumber
                     Db.Schedule.TimeStamp = DateTime.Now
                 }
                 let newReservationType =
