@@ -68,7 +68,9 @@ let update msg model =
     | LoadScheduleResult (Ok schedule) ->
         Deferred.Resolved {
             Schedule = schedule
-            SelectedDate = schedule.Dates.Head.Date
+            SelectedDate =
+                Schedule.tryGetFirstFreeDate schedule
+                |> Option.defaultValue schedule.Dates.Head.Date
             SelectedScheduleEntry = None
             Quantity = None
             Name = None
@@ -198,6 +200,198 @@ let schedule = React.functionComponent(fun () ->
             ]
         ]
 
+    let bookingForm loadedModel isReservationEnabled =
+        Bulma.section [
+            Html.form [
+                prop.onSubmit (fun e -> e.preventDefault(); dispatch Book)
+                prop.children [
+                    yield Bulma.label [ Html.text "Zeitpunkt / freie Plätze" ]
+                    let groupedEntries =
+                        loadedModel.Schedule.Entries
+                        |> List.groupBy (fun e -> e.StartTime.Date)
+                        |> List.map (fun (key, entries) ->
+                            let entriesByHour =
+                                entries
+                                |> List.groupBy (fun e -> e.StartTime.TimeOfDay.Hours)
+                            (key, entriesByHour)
+                        )
+                    yield Bulma.buttons [
+                        for (date, _) in groupedEntries ->
+                            Bulma.button.a [
+                                prop.text (date.ToString("dd.MM.yyyy"))
+                                button.isLarge
+                                prop.onClick (fun _ -> dispatch (SelectDate date))
+                                if loadedModel.SelectedDate = date then
+                                    color.isSuccess
+                            ]
+                    ]
+                    yield Html.hr []
+                    for (_, entries) in groupedEntries |> List.find (fun (date, _) -> date = loadedModel.SelectedDate) |> snd ->
+                        Bulma.buttons [
+                            for entry in entries ->
+                                let isDisabled = not isReservationEnabled || entry.StartTime < System.DateTimeOffset.Now || entry.ReservationType = Taken
+                                let text = sprintf "%02d:%02d" entry.StartTime.TimeOfDay.Hours entry.StartTime.TimeOfDay.Minutes
+                                Bulma.button.a [
+                                    prop.disabled isDisabled
+                                    match entry.ReservationType with
+                                    | Free (maxQuantity, _link) when loadedModel.SelectedScheduleEntry = Some entry ->
+                                        yield! [
+                                            prop.text (sprintf "%s | %d P." text maxQuantity)
+                                            prop.onClick (fun _ -> dispatch (SelectScheduleEntry None))
+                                            color.isSuccess
+                                        ]
+                                    | Free (maxQuantity, _link) ->
+                                        yield! [
+                                            prop.text (sprintf "%s | %d P." text maxQuantity)
+                                            prop.onClick (fun _ -> dispatch (SelectScheduleEntry (Some entry)))
+                                        ]
+                                    | Taken ->
+                                        yield! [
+                                            prop.text (sprintf "%s | 0 P." text)
+                                            color.isDanger
+                                        ]
+                                ]
+                        ]
+            
+                    yield Bulma.field.div [
+                        Bulma.label [ Html.text "Anzahl Personen" ]
+                        Bulma.buttons [
+                            let maxQuantity =
+                                match loadedModel.SelectedScheduleEntry with
+                                | Some { ReservationType = Free (maxQuantity, _reservationLink) } -> maxQuantity
+                                | _ ->
+                                    loadedModel.Schedule.Entries
+                                    |> List.map (fun entry ->
+                                        match entry.ReservationType with
+                                        | Free (maxQuantity, _reservationLink) -> maxQuantity
+                                        | Taken -> 0
+                                    )
+                                    |> List.max
+                            for quantity in [1..maxQuantity] ->
+                                Bulma.button.a [
+                                    prop.onClick (fun _ -> dispatch (SetQuantity quantity))
+                                    match loadedModel.Quantity with
+                                    | Some (c, true) when c = quantity -> color.isSuccess
+                                    | _ -> ()
+                                    prop.textf "%d" quantity
+                                ]
+                        ]
+                    ]
+                    yield Bulma.field.div [
+                        Bulma.label [ Html.text "Name" ]
+                        Bulma.control.div [
+                            control.hasIconsLeft
+                            control.hasIconsRight
+                            prop.children [
+                                Bulma.input.text [
+                                    prop.placeholder "Bitte geben Sie Ihren Namen an"
+                                    prop.value (loadedModel.Name |> Option.map fst |> Option.defaultValue "")
+                                    prop.disabled (not isReservationEnabled)
+                                    match loadedModel.Name with
+                                    | Some (_, true) -> color.isSuccess
+                                    | Some _ -> color.isDanger
+                                    | None -> ()
+                                    prop.onChange (fun (e: Browser.Types.Event) -> dispatch (SetName e.target?value))
+                                ]
+                                Bulma.icon [
+                                    icon.isSmall
+                                    icon.isLeft
+                                    prop.children [
+                                        Fa.i [ Fa.Solid.User ] []
+                                    ]
+                                ]
+                            ]
+                        ]
+                    ]
+                    yield Bulma.field.div [
+                        Bulma.label [ Html.text "E-Mail-Adresse" ]
+                        Bulma.control.div [
+                            control.hasIconsLeft
+                            control.hasIconsRight
+                            prop.children [
+                                Bulma.input.text [
+                                    prop.placeholder "Bitte geben Sie Ihre E-Mail-Adresse an"
+                                    prop.value (loadedModel.MailAddress |> Option.map fst |> Option.defaultValue "")
+                                    prop.disabled (not isReservationEnabled)
+                                    match loadedModel.MailAddress with
+                                    | Some (_, true) -> color.isSuccess
+                                    | Some _ -> color.isDanger
+                                    | None -> ()
+                                    prop.onChange (fun (e: Browser.Types.Event) -> dispatch (SetMailAddress e.target?value))
+                                ]
+                                Bulma.icon [
+                                    icon.isSmall
+                                    icon.isLeft
+                                    prop.children [
+                                        Fa.i [ Fa.Solid.Envelope ] []
+                                    ]
+                                ]
+                            ]
+                        ]
+                    ]
+
+                    yield Bulma.field.div [
+                        Bulma.label [ Html.text "Telefonnummer" ]
+                        Bulma.control.div [
+                            control.hasIconsLeft
+                            control.hasIconsRight
+                            prop.children [
+                                Bulma.input.text [
+                                    prop.placeholder "Bitte geben Sie Ihre Telefonnummer an"
+                                    prop.value (loadedModel.PhoneNumber |> Option.map fst |> Option.defaultValue "")
+                                    prop.disabled (not isReservationEnabled)
+                                    match loadedModel.PhoneNumber with
+                                    | Some (_, true) -> color.isSuccess
+                                    | Some _ -> color.isDanger
+                                    | None -> ()
+                                    prop.onChange (fun (e: Browser.Types.Event) -> dispatch (SetPhoneNumber e.target?value))
+                                ]
+                                Bulma.icon [
+                                    icon.isSmall
+                                    icon.isLeft
+                                    prop.children [
+                                        Fa.i [ Fa.Solid.PhoneAlt ] []
+                                    ]
+                                ]
+                            ]
+                        ]
+                    ]
+
+                    yield Bulma.level [
+                        Bulma.levelLeft [
+                            Bulma.levelItem [
+                                Bulma.button.button [
+                                    prop.type' "submit"
+                                    prop.text "Reservieren"
+                                    color.isSuccess
+                                    match isReservationEnabled, loadedModel.SelectedScheduleEntry, loadedModel.Quantity, loadedModel.Name, loadedModel.MailAddress, loadedModel.PhoneNumber with
+                                    | true, Some _, Some (_, true), Some (_, true), Some (_, true), Some (_, true) -> ()
+                                    | _ -> prop.disabled true
+                                    if Deferred.inProgress loadedModel.BookingState then button.isLoading
+                                ]
+                            ]
+                            match loadedModel.BookingState with
+                            | Deferred.Resolved () ->
+                                Bulma.levelItem [
+                                    color.hasTextSuccess
+                                    prop.children [
+                                        Html.text "Ihre Reservierung wurde erfolgreich gespeichert. Sie erhalten in Kürze eine Bestätigung per Mail."
+                                    ]
+                                ]
+                            | Deferred.Failed _ ->
+                                Bulma.levelItem [
+                                    color.hasTextDanger
+                                    prop.children [
+                                        Html.text "Fehler beim Reservieren. Bitte versuchen Sie es erneut bzw. laden sie die Seite neu."
+                                    ]
+                                ]
+                            | _ -> ()
+                        ]
+                    ]
+                ]
+            ]
+        ]
+
     match state with
     | Deferred.HasNotStartedYet -> [ header None ]
     | Deferred.InProgress -> [ header None; View.loadIconBig ]
@@ -214,196 +408,17 @@ let schedule = React.functionComponent(fun () ->
                     Bulma.section [
                         View.errorNotificationWithRetry (sprintf "Die Reservierung ist ab %s möglich" (formatDate loadedModel.Schedule.ReservationStartTime)) (fun () -> dispatch LoadSchedule)
                     ]
-                Bulma.section [
-                    Html.form [
-                        prop.onSubmit (fun e -> e.preventDefault(); dispatch Book)
-                        prop.children [
-                            yield Bulma.label [ Html.text "Zeitpunkt / freie Plätze" ]
-                            let groupedEntries =
-                                loadedModel.Schedule.Entries
-                                |> List.groupBy (fun e -> e.StartTime.Date)
-                                |> List.map (fun (key, entries) ->
-                                    let entriesByHour =
-                                        entries
-                                        |> List.groupBy (fun e -> e.StartTime.TimeOfDay.Hours)
-                                    (key, entriesByHour)
-                                )
-                            yield Bulma.buttons [
-                                for (date, _) in groupedEntries ->
-                                    Bulma.button.a [
-                                        prop.text (date.ToString("dd.MM.yyyy"))
-                                        button.isLarge
-                                        prop.onClick (fun _ -> dispatch (SelectDate date))
-                                        if loadedModel.SelectedDate = date then
-                                            color.isSuccess
-                                    ]
-                            ]
-                            yield Html.hr []
-                            for (_, entries) in groupedEntries |> List.find (fun (date, _) -> date = loadedModel.SelectedDate) |> snd ->
-                                Bulma.buttons [
-                                    for entry in entries ->
-                                        let isDisabled = not isReservationEnabled || entry.StartTime < System.DateTimeOffset.Now || entry.ReservationType = Taken
-                                        let text = sprintf "%02d:%02d" entry.StartTime.TimeOfDay.Hours entry.StartTime.TimeOfDay.Minutes
-                                        Bulma.button.a [
-                                            prop.disabled isDisabled
-                                            match entry.ReservationType with
-                                            | Free (maxQuantity, _link) when loadedModel.SelectedScheduleEntry = Some entry ->
-                                                yield! [
-                                                    prop.text (sprintf "%s | %d P." text maxQuantity)
-                                                    prop.onClick (fun _ -> dispatch (SelectScheduleEntry None))
-                                                    color.isSuccess
-                                                ]
-                                            | Free (maxQuantity, _link) ->
-                                                yield! [
-                                                    prop.text (sprintf "%s | %d P." text maxQuantity)
-                                                    prop.onClick (fun _ -> dispatch (SelectScheduleEntry (Some entry)))
-                                                ]
-                                            | Taken ->
-                                                yield! [
-                                                    prop.text (sprintf "%s | 0 P." text)
-                                                    color.isDanger
-                                                ]
-                                        ]
-                                ]
-                    
-                            yield Bulma.field.div [
-                                Bulma.label [ Html.text "Anzahl Personen" ]
-                                Bulma.buttons [
-                                    let maxQuantity =
-                                        match loadedModel.SelectedScheduleEntry with
-                                        | Some { ReservationType = Free (maxQuantity, _reservationLink) } -> maxQuantity
-                                        | _ ->
-                                            loadedModel.Schedule.Entries
-                                            |> List.choose (fun entry ->
-                                                match entry.ReservationType with
-                                                | Free (maxQuantity, _reservationLink) -> Some maxQuantity
-                                                | _ -> None
-                                            )
-                                            |> List.max
-                                    for quantity in [1..maxQuantity] ->
-                                        Bulma.button.a [
-                                            prop.onClick (fun _ -> dispatch (SetQuantity quantity))
-                                            match loadedModel.Quantity with
-                                            | Some (c, true) when c = quantity -> color.isSuccess
-                                            | _ -> ()
-                                            prop.textf "%d" quantity
-                                        ]
-                                ]
-                            ]
-                            yield Bulma.field.div [
-                                Bulma.label [ Html.text "Name" ]
-                                Bulma.control.div [
-                                    control.hasIconsLeft
-                                    control.hasIconsRight
-                                    prop.children [
-                                        Bulma.input.text [
-                                            prop.placeholder "Bitte geben Sie Ihren Namen an"
-                                            prop.value (loadedModel.Name |> Option.map fst |> Option.defaultValue "")
-                                            prop.disabled (not isReservationEnabled)
-                                            match loadedModel.Name with
-                                            | Some (_, true) -> color.isSuccess
-                                            | Some _ -> color.isDanger
-                                            | None -> ()
-                                            prop.onChange (fun (e: Browser.Types.Event) -> dispatch (SetName e.target?value))
-                                        ]
-                                        Bulma.icon [
-                                            icon.isSmall
-                                            icon.isLeft
-                                            prop.children [
-                                                Fa.i [ Fa.Solid.User ] []
-                                            ]
-                                        ]
-                                    ]
-                                ]
-                            ]
-                            yield Bulma.field.div [
-                                Bulma.label [ Html.text "E-Mail-Adresse" ]
-                                Bulma.control.div [
-                                    control.hasIconsLeft
-                                    control.hasIconsRight
-                                    prop.children [
-                                        Bulma.input.text [
-                                            prop.placeholder "Bitte geben Sie Ihre E-Mail-Adresse an"
-                                            prop.value (loadedModel.MailAddress |> Option.map fst |> Option.defaultValue "")
-                                            prop.disabled (not isReservationEnabled)
-                                            match loadedModel.MailAddress with
-                                            | Some (_, true) -> color.isSuccess
-                                            | Some _ -> color.isDanger
-                                            | None -> ()
-                                            prop.onChange (fun (e: Browser.Types.Event) -> dispatch (SetMailAddress e.target?value))
-                                        ]
-                                        Bulma.icon [
-                                            icon.isSmall
-                                            icon.isLeft
-                                            prop.children [
-                                                Fa.i [ Fa.Solid.Envelope ] []
-                                            ]
-                                        ]
-                                    ]
-                                ]
-                            ]
-
-                            yield Bulma.field.div [
-                                Bulma.label [ Html.text "Telefonnummer" ]
-                                Bulma.control.div [
-                                    control.hasIconsLeft
-                                    control.hasIconsRight
-                                    prop.children [
-                                        Bulma.input.text [
-                                            prop.placeholder "Bitte geben Sie Ihre Telefonnummer an"
-                                            prop.value (loadedModel.PhoneNumber |> Option.map fst |> Option.defaultValue "")
-                                            prop.disabled (not isReservationEnabled)
-                                            match loadedModel.PhoneNumber with
-                                            | Some (_, true) -> color.isSuccess
-                                            | Some _ -> color.isDanger
-                                            | None -> ()
-                                            prop.onChange (fun (e: Browser.Types.Event) -> dispatch (SetPhoneNumber e.target?value))
-                                        ]
-                                        Bulma.icon [
-                                            icon.isSmall
-                                            icon.isLeft
-                                            prop.children [
-                                                Fa.i [ Fa.Solid.PhoneAlt ] []
-                                            ]
-                                        ]
-                                    ]
-                                ]
-                            ]
-
-                            yield Bulma.level [
-                                Bulma.levelLeft [
-                                    Bulma.levelItem [
-                                        Bulma.button.button [
-                                            prop.type' "submit"
-                                            prop.text "Reservieren"
-                                            color.isSuccess
-                                            match isReservationEnabled, loadedModel.SelectedScheduleEntry, loadedModel.Quantity, loadedModel.Name, loadedModel.MailAddress, loadedModel.PhoneNumber with
-                                            | true, Some _, Some (_, true), Some (_, true), Some (_, true), Some (_, true) -> ()
-                                            | _ -> prop.disabled true
-                                            if Deferred.inProgress loadedModel.BookingState then button.isLoading
-                                        ]
-                                    ]
-                                    match loadedModel.BookingState with
-                                    | Deferred.Resolved () ->
-                                        Bulma.levelItem [
-                                            color.hasTextSuccess
-                                            prop.children [
-                                                Html.text "Ihre Reservierung wurde erfolgreich gespeichert. Sie erhalten in Kürze eine Bestätigung per Mail."
-                                            ]
-                                        ]
-                                    | Deferred.Failed _ ->
-                                        Bulma.levelItem [
-                                            color.hasTextDanger
-                                            prop.children [
-                                                Html.text "Fehler beim Reservieren. Bitte versuchen Sie es erneut bzw. laden sie die Seite neu."
-                                            ]
-                                        ]
-                                    | _ -> ()
-                                ]
-                            ]
+                match Schedule.tryGetFirstFreeDate loadedModel.Schedule with
+                | Some _ -> bookingForm loadedModel isReservationEnabled
+                | None ->
+                    View.errorNotification (Html.span [
+                        Html.text "Leider sind keine Termine mehr frei. Bitte versuchen Sie es unter 07672/24605 bzw. "
+                        Html.a [
+                            prop.text "office@htlvb.at"
+                            prop.href (sprintf "mailto:office@htlvb.at?subject=%s" loadedModel.Schedule.Title)
                         ]
-                    ]
-                ]
+                        Html.text "."
+                    ])
             ]
         ]
 )

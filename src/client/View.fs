@@ -14,6 +14,29 @@ let retryButton onRetry =
         ]
     ]
 
+let errorNotification (message: ReactElement) =
+    Bulma.notification [
+        prop.className "m-3"
+        color.isDanger
+        prop.children [
+            Bulma.level [
+                Bulma.levelLeft [
+                    Bulma.levelItem [
+                        Bulma.icon [
+                            Fa.i [ Fa.Solid.ExclamationTriangle; Fa.Size Fa.Fa2x ] []
+                        ]
+                    ]
+                    Bulma.levelItem [
+                        Bulma.title.p [
+                            title.is4
+                            prop.children [ message ]
+                        ]
+                    ]
+                ]
+            ]
+        ]
+    ]
+
 let errorNotificationWithRetry (message: string) onRetry =
     Bulma.notification [
         prop.className "m-3"
