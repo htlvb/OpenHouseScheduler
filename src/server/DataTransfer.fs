@@ -30,6 +30,7 @@ type Schedule = {
 module Schedule =
     let tryGetFirstFreeDate schedule =
         schedule.Dates
+        |> List.filter (fun date -> date.Date >= DateTime.Today)
         |> List.tryFind (fun date ->
             schedule.Entries
             |> List.exists (fun entry -> entry.StartTime.Date = date.Date && ReservationType.isFree entry.ReservationType)
