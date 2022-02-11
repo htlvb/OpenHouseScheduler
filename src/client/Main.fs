@@ -237,13 +237,15 @@ let schedule = React.functionComponent(fun () ->
                                     | Free (maxQuantity, _link) when loadedModel.SelectedScheduleEntry = Some entry ->
                                         yield! [
                                             prop.text (sprintf "%s | %d P." text maxQuantity)
-                                            prop.onClick (fun _ -> dispatch (SelectScheduleEntry None))
+                                            if not isDisabled then
+                                                prop.onClick (fun _ -> dispatch (SelectScheduleEntry None))
                                             color.isSuccess
                                         ]
                                     | Free (maxQuantity, _link) ->
                                         yield! [
                                             prop.text (sprintf "%s | %d P." text maxQuantity)
-                                            prop.onClick (fun _ -> dispatch (SelectScheduleEntry (Some entry)))
+                                            if not isDisabled then
+                                                prop.onClick (fun _ -> dispatch (SelectScheduleEntry (Some entry)))
                                         ]
                                     | Taken ->
                                         yield! [
