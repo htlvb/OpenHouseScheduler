@@ -271,11 +271,14 @@ let schedule = React.functionComponent(fun () ->
                                     |> List.max
                             for quantity in [1..maxQuantity] ->
                                 Bulma.button.a [
-                                    prop.onClick (fun _ -> dispatch (SetQuantity quantity))
-                                    match loadedModel.Quantity with
-                                    | Some (c, true) when c = quantity -> color.isSuccess
-                                    | _ -> ()
                                     prop.textf "%d" quantity
+                                    if isReservationEnabled then
+                                        prop.onClick (fun _ -> dispatch (SetQuantity quantity))
+                                        match loadedModel.Quantity with
+                                        | Some (c, true) when c = quantity -> color.isSuccess
+                                        | _ -> ()
+                                    else
+                                        prop.disabled true
                                 ]
                         ]
                     ]
